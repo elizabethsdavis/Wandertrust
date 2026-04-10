@@ -1393,76 +1393,42 @@ function WardrobeCarousel({ slotId, wardrobe, onSelect, onCreateNew, selected })
   );
 }
 
-function slotToSection(slotId) {
-  return slotId === "shoes" ? "Shoes" : slotId === "bag" ? "Bags & Purses" :
-    slotId === "necklace" || slotId === "bracelet" ? "Jewelry" :
-    slotId === "eyewear" ? "Eyewear" : slotId === "hair" ? "Hair Accessories" :
-    slotId === "layer" ? "Outerwear" : "Clothing";
-}
-
-function collectUniqueOutfitItems(occasions) {
-  const uniqueItems = new Map();
-  occasions.forEach((dayOccs) => {
-    dayOccs.forEach((occ) => {
-      Object.entries(occ.slots).forEach(([slotId, val]) => {
-        if (val && !uniqueItems.has(val.toLowerCase())) {
-          uniqueItems.set(val.toLowerCase(), { name: val, section: slotToSection(slotId) });
-        }
-      });
-    });
-  });
-  return Array.from(uniqueItems.values());
-}
-
-function OutfitBuilder({ trip, wardrobe, setWardrobe, onSave, onExit }) {
-  // Hub vs editor mode
-  const [editing, setEditing] = useState(null); // null = hub, { dayIdx, occIdx } = editing
-  const [occasions, setOccasions] = useState(() => {
-    // Resume from saved outfitPlan if it exists
-    if (trip.outfitPlan && trip.outfitPlan.length === trip.days) return trip.outfitPlan;
-    return Array.from({ length: trip.days }, (_, i) => [{
+function OutfitBuilder({ trip, wardrobe, setWardrobe, onComplete, onExit }) {
+  const [dayIdx, setDayIdx] = useState(0);
+  const [slotIdx, setSlotIdx] = useState(0);
+  const [occasions, setOccasions] = useState(() =>
+    Array.from({ length: trip.days }, (_, i) => [{
       id: id(), type: "daytime", label: i === 0 ? "Travel Day" : i === trip.days - 1 ? "Travel Home" : `Day ${i + 1}`,
       slots: {}
-    }]);
-  });
-  const [slotIdx, setSlotIdx] = useState(0);
+    }])
+  );
   const [addingNew, setAddingNew] = useState(false);
   const [newItemVal, setNewItemVal] = useState("");
   const [showAddOccasion, setShowAddOccasion] = useState(false);
-  const [saveFlash, setSaveFlash] = useState("");
   const newRef = useRef(null);
 
   useEffect(() => { if (addingNew && newRef.current) newRef.current.focus(); }, [addingNew]);
 
+  const currentDayOccasions = occasions[dayIdx] || [];
+  const [occIdx, setOccIdx] = useState(0);
+  const currentOccasion = currentDayOccasions[occIdx];
+  const currentSlot = OUTFIT_SLOTS[slotIdx];
   const totalDays = trip.days;
   const totalSlots = OUTFIT_SLOTS.length;
 
-  // Auto-save whenever occasions change
-  useEffect(() => { onSave(occasions, false); }, [occasions]);
-
-  // Count completed outfits (has at least top + bottom filled)
-  const completedOutfits = useMemo(() => {
-    let count = 0;
-    occasions.forEach(dayOccs => dayOccs.forEach(occ => {
-      if (occ.slots.top && occ.slots.bottom) count++;
-    }));
-    return count;
-  }, [occasions]);
-
+  // Calculate overall progress
   const totalOccasions = occasions.reduce((s, d) => s + d.length, 0);
-
-  // ── Slot editing helpers ──
-  const dayIdx = editing?.dayIdx ?? 0;
-  const occIdx = editing?.occIdx ?? 0;
-  const currentDayOccasions = occasions[dayIdx] || [];
-  const currentOccasion = currentDayOccasions[occIdx];
-  const currentSlot = OUTFIT_SLOTS[slotIdx];
+  const filledSlots = occasions.reduce((s, d) => s + d.reduce((s2, o) => s2 + Object.keys(o.slots).filter(k => o.slots[k]).length, 0), 0);
+  const requiredSlots = OUTFIT_SLOTS.filter(s => !s.optional).length;
+  const progress = totalOccasions > 0 ? Math.min(100, Math.round((filledSlots / (totalOccasions * requiredSlots)) * 100)) : 0;
 
   const setSlotValue = (val) => {
     const updated = [...occasions];
     updated[dayIdx] = [...updated[dayIdx]];
     updated[dayIdx][occIdx] = { ...updated[dayIdx][occIdx], slots: { ...updated[dayIdx][occIdx].slots, [currentSlot.id]: val } };
     setOccasions(updated);
+
+    // Save to wardrobe
     if (val && !wardrobe[currentSlot.id]?.includes(val)) {
       setWardrobe(prev => ({ ...prev, [currentSlot.id]: [...(prev[currentSlot.id] || []), val] }));
     }
@@ -1473,211 +1439,146 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, onSave, onExit }) {
     const updated = [...occasions];
     updated[dayIdx] = [...updated[dayIdx], { id: id(), type, label: typeInfo?.label || type, slots: {} }];
     setOccasions(updated);
-    setEditing({ dayIdx, occIdx: updated[dayIdx].length - 1 });
+    setOccIdx(updated[dayIdx].length - 1);
     setSlotIdx(0);
     setShowAddOccasion(false);
   };
 
-  const removeOccasion = (di, oi) => {
-    if (occasions[di].length <= 1) return;
+  const removeOccasion = (oi) => {
+    if (currentDayOccasions.length <= 1) return;
     const updated = [...occasions];
-    updated[di] = updated[di].filter((_, i) => i !== oi);
+    updated[dayIdx] = updated[dayIdx].filter((_, i) => i !== oi);
     setOccasions(updated);
-    if (editing && editing.dayIdx === di && editing.occIdx >= oi) {
-      setEditing({ dayIdx: di, occIdx: Math.max(0, editing.occIdx - 1) });
-    }
-  };
-
-  const handleDoneOutfit = () => {
-    // Save + sync to packing list immediately
-    setSaveFlash("Saved!");
-    setTimeout(() => setSaveFlash(""), 1500);
-    onSave(occasions, true);
-    setEditing(null);
-    setSlotIdx(0);
+    setOccIdx(Math.min(occIdx, updated[dayIdx].length - 1));
   };
 
   const goNext = () => {
-    if (slotIdx < totalSlots - 1) setSlotIdx(s => s + 1);
-    else handleDoneOutfit(); // auto-finish when last slot reached
+    if (slotIdx < totalSlots - 1) { setSlotIdx(s => s + 1); }
+    else if (occIdx < currentDayOccasions.length - 1) { setOccIdx(o => o + 1); setSlotIdx(0); }
+    else if (dayIdx < totalDays - 1) { setDayIdx(d => d + 1); setOccIdx(0); setSlotIdx(0); }
+    else { /* done */ }
   };
 
   const goPrev = () => {
     if (slotIdx > 0) setSlotIdx(s => s - 1);
+    else if (occIdx > 0) { setOccIdx(o => o - 1); setSlotIdx(totalSlots - 1); }
+    else if (dayIdx > 0) { setDayIdx(d => d - 1); setOccIdx(occasions[dayIdx - 1].length - 1); setSlotIdx(totalSlots - 1); }
   };
 
-  const selectedValue = currentOccasion?.slots?.[currentSlot?.id] || "";
-  const dayLabel = (di) => di === 0 ? "Travel Day" : di === totalDays - 1 ? "Last Day" : `Day ${di + 1}`;
-  const dayEmoji = (di) => DAY_EMOJIS[di % DAY_EMOJIS.length];
+  const isLast = dayIdx === totalDays - 1 && occIdx === currentDayOccasions.length - 1 && slotIdx === totalSlots - 1;
+  const isFirst = dayIdx === 0 && occIdx === 0 && slotIdx === 0;
+  const selectedValue = currentOccasion?.slots?.[currentSlot.id] || "";
 
-  // ═══ HUB VIEW — shows all outfits as cards ═══
-  if (!editing) {
-    return (
-      <div style={{ minHeight: "100vh", background: `linear-gradient(180deg, #FFF8F2 0%, ${C.cream} 100%)` }}>
-        {/* Header */}
-        <div style={{ padding: "16px 20px", display: "flex", alignItems: "center", gap: 12,
-          borderBottom: `1px solid ${C.borderLight}`, background: "rgba(255,248,242,.95)", backdropFilter: "blur(10px)" }}>
-          <button onClick={onExit} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
-            <ArrowLeft size={20} color={C.warmGray} />
-          </button>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontFamily: F.body, fontSize: 13, fontWeight: 600, color: C.copper }}>Build My Outfits</div>
-            <div style={{ fontFamily: F.body, fontSize: 11, color: C.softGray }}>{trip.destination} · {completedOutfits} of {totalOccasions} outfits built</div>
-          </div>
-          {saveFlash && <span style={{ fontFamily: F.body, fontSize: 12, fontWeight: 600, color: C.sage,
-            animation: "fadeIn .3s" }}>{saveFlash}</span>}
-        </div>
+  // Finish: collect all unique items and return
+  const handleFinish = () => {
+    const uniqueItems = new Map(); // name -> { name, section }
+    occasions.forEach((dayOccs, di) => {
+      dayOccs.forEach((occ) => {
+        Object.entries(occ.slots).forEach(([slotId, val]) => {
+          if (val && !uniqueItems.has(val)) {
+            const slot = OUTFIT_SLOTS.find(s => s.id === slotId);
+            const section = slotId === "shoes" ? "Shoes" : slotId === "bag" ? "Bags & Purses" :
+              slotId === "necklace" || slotId === "bracelet" ? "Jewelry" :
+              slotId === "eyewear" ? "Eyewear" : slotId === "hair" ? "Hair Accessories" :
+              slotId === "layer" ? "Outerwear" : "Clothing";
+            uniqueItems.set(val, { name: val, section });
+          }
+        });
+      });
+    });
+    onComplete(Array.from(uniqueItems.values()), occasions);
+  };
 
-        <div style={{ padding: "20px 16px 32px" }}>
-          <h2 style={{ fontFamily: F.display, fontSize: 28, color: C.charcoal, fontWeight: 400, marginBottom: 4, padding: "0 4px" }}>
-            Your outfits
-          </h2>
-          <p style={{ fontFamily: F.body, fontSize: 13, color: C.softGray, marginBottom: 20, padding: "0 4px" }}>
-            Tap any outfit to edit it, or add new ones. Progress saves automatically.
-          </p>
+  // Day label
+  const dayLabel = dayIdx === 0 ? "Travel Day" : dayIdx === totalDays - 1 ? "Last Day" : `Day ${dayIdx + 1}`;
+  const dayEmoji = DAY_EMOJIS[dayIdx % DAY_EMOJIS.length];
 
-          {occasions.map((dayOccs, di) => (
-            <div key={di} style={{ marginBottom: 20 }}>
-              <div style={{ fontFamily: F.body, fontSize: 11, fontWeight: 600, textTransform: "uppercase",
-                letterSpacing: ".06em", color: C.copper, marginBottom: 8, padding: "0 4px",
-                display: "flex", alignItems: "center", gap: 6 }}>
-                {dayEmoji(di)} {dayLabel(di)}
-              </div>
-
-              <div style={{ display: "grid", gap: 8 }}>
-                {dayOccs.map((occ, oi) => {
-                  const filled = Object.entries(occ.slots).filter(([, v]) => v);
-                  const hasTopBottom = occ.slots.top && occ.slots.bottom;
-                  const typeInfo = OCCASION_TYPES.find(t => t.id === occ.type);
-                  return (
-                    <button key={occ.id} onClick={() => { setEditing({ dayIdx: di, occIdx: oi }); setSlotIdx(0); }}
-                      style={{ display: "flex", alignItems: "flex-start", gap: 14, padding: "14px 16px", borderRadius: 16,
-                        background: C.warmWhite, border: `1.5px solid ${hasTopBottom ? C.sageLight : C.borderLight}`,
-                        cursor: "pointer", textAlign: "left", width: "100%", transition: "all .2s",
-                        boxShadow: `0 2px 8px ${C.shadow}` }}
-                      onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = `0 4px 12px ${C.shadowMed}`; }}
-                      onMouseLeave={e => { e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = `0 2px 8px ${C.shadow}`; }}>
-                      <div style={{ width: 40, height: 40, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center",
-                        background: hasTopBottom ? C.sageGlow : C.copperSubtle, flexShrink: 0 }}>
-                        {hasTopBottom ? <Check size={18} color={C.sage} /> : <Shirt size={18} color={C.copper} />}
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontFamily: F.body, fontSize: 13, fontWeight: 500, color: C.charcoal, marginBottom: 2 }}>
-                          {typeInfo?.icon} {occ.label}
-                        </div>
-                        {filled.length > 0 ? (
-                          <div style={{ fontFamily: F.body, fontSize: 12, color: C.warmGray, lineHeight: 1.5 }}>
-                            {filled.slice(0, 4).map(([slotId, val]) => (
-                              <span key={slotId}>{OUTFIT_SLOTS.find(s => s.id === slotId)?.emoji} {val}  </span>
-                            ))}
-                            {filled.length > 4 && <span style={{ color: C.softGray }}>+{filled.length - 4} more</span>}
-                          </div>
-                        ) : (
-                          <div style={{ fontFamily: F.body, fontSize: 12, color: C.softGray, fontStyle: "italic" }}>
-                            Tap to start building this outfit
-                          </div>
-                        )}
-                      </div>
-                      <ChevronRight size={16} color={C.softGray} style={{ marginTop: 4 }} />
-                    </button>
-                  );
-                })}
-
-                {/* Add another occasion to this day */}
-                <button onClick={() => {
-                  setEditing({ dayIdx: di, occIdx: dayOccs.length });
-                  setShowAddOccasion(true);
-                  // temporarily set editing so addOccasion works on the right day
-                  const typeInfo = OCCASION_TYPES.find(t => !dayOccs.find(o => o.type === t.id));
-                  if (typeInfo) {
-                    const updated = [...occasions];
-                    updated[di] = [...updated[di], { id: id(), type: typeInfo.id, label: typeInfo.label, slots: {} }];
-                    setOccasions(updated);
-                    setEditing({ dayIdx: di, occIdx: updated[di].length - 1 });
-                    setSlotIdx(0);
-                    setShowAddOccasion(false);
-                  }
-                }}
-                  style={{ padding: "12px 16px", borderRadius: 14, border: `2px dashed ${C.borderMedium}`,
-                    background: "transparent", cursor: "pointer", display: "flex", alignItems: "center",
-                    justifyContent: "center", gap: 8, fontFamily: F.body, fontSize: 13, color: C.copper,
-                    transition: "all .15s" }}
-                  onMouseEnter={e => e.currentTarget.style.background = C.copperSubtle}
-                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                  <Plus size={14} /> Add outfit for {dayLabel(di).toLowerCase()}
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Bottom bar */}
-        <div style={{ padding: "16px 20px 32px", borderTop: `1px solid ${C.borderLight}`,
-          background: "rgba(253,248,240,.95)", position: "sticky", bottom: 0 }}>
-          <Btn v="sage" sz="lg" onClick={() => { onSave(occasions, true); onExit(); }} style={{ width: "100%" }}>
-            <Sparkles size={18} /> Done — sync to packing list
-          </Btn>
-          <div style={{ fontFamily: F.body, fontSize: 11, color: C.softGray, textAlign: "center", marginTop: 8 }}>
-            {completedOutfits} outfit{completedOutfits !== 1 ? "s" : ""} ready · items auto-added to your list
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ═══ OUTFIT EDITOR — editing a single outfit ═══
   return (
     <div style={{ minHeight: "100vh", background: `linear-gradient(180deg, #FFF8F2 0%, ${C.cream} 100%)` }}>
       {/* Header */}
       <div style={{ padding: "16px 20px", display: "flex", alignItems: "center", gap: 12,
         borderBottom: `1px solid ${C.borderLight}`, background: "rgba(255,248,242,.95)", backdropFilter: "blur(10px)" }}>
-        <button onClick={handleDoneOutfit} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
+        <button onClick={onExit} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
           <ArrowLeft size={20} color={C.warmGray} />
         </button>
         <div style={{ flex: 1 }}>
-          <div style={{ fontFamily: F.body, fontSize: 13, fontWeight: 600, color: C.copper }}>
-            {dayEmoji(dayIdx)} {dayLabel(dayIdx)}
-          </div>
-          <div style={{ fontFamily: F.body, fontSize: 11, color: C.softGray }}>
-            {currentOccasion?.label || "Outfit"} · {Object.values(currentOccasion?.slots || {}).filter(Boolean).length} items
-          </div>
+          <div style={{ fontFamily: F.body, fontSize: 13, fontWeight: 600, color: C.copper }}>Build My Outfits</div>
+          <div style={{ fontFamily: F.body, fontSize: 11, color: C.softGray }}>{trip.destination} · {trip.days} days</div>
         </div>
-        <Btn v="sage" sz="sm" onClick={handleDoneOutfit}>
-          <Check size={14} /> Done
-        </Btn>
+        <ProgressRing pct={progress} size={40} sw={3}>
+          <span style={{ fontFamily: F.body, fontSize: 10, fontWeight: 600, color: C.charcoal }}>{progress}%</span>
+        </ProgressRing>
       </div>
 
-      {/* Occasion tabs for this day */}
-      {currentDayOccasions.length > 1 && (
-        <div style={{ padding: "8px 16px 4px" }}>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            {currentDayOccasions.map((occ, i) => {
-              const active = i === occIdx;
-              const typeInfo = OCCASION_TYPES.find(t => t.id === occ.type);
-              return (
-                <button key={occ.id} onClick={() => { setEditing({ dayIdx, occIdx: i }); setSlotIdx(0); }}
-                  style={{ padding: "6px 14px", borderRadius: 10, display: "flex", alignItems: "center", gap: 6,
-                    border: `1px solid ${active ? C.copper : C.borderLight}`,
-                    background: active ? C.copperGlow : C.warmWhite,
-                    cursor: "pointer", fontFamily: F.body, fontSize: 12, fontWeight: active ? 600 : 400,
-                    color: active ? C.copper : C.warmGray }}>
-                  {typeInfo?.icon} {occ.label}
-                  {currentDayOccasions.length > 1 && active && (
-                    <button onClick={(e) => { e.stopPropagation(); removeOccasion(dayIdx, i); }}
-                      style={{ background: "none", border: "none", cursor: "pointer", padding: 0,
-                        marginLeft: 4, color: C.softGray, display: "flex" }}>
-                      <X size={12} />
-                    </button>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+      {/* Day tabs */}
+      <div style={{ display: "flex", gap: 4, padding: "12px 16px", overflowX: "auto" }}>
+        {Array.from({ length: totalDays }, (_, i) => {
+          const dayOccs = occasions[i] || [];
+          const dayFilled = dayOccs.some(o => Object.keys(o.slots).length > 0);
+          const active = i === dayIdx;
+          return (
+            <button key={i} onClick={() => { setDayIdx(i); setOccIdx(0); setSlotIdx(0); }}
+              style={{ minWidth: 48, padding: "8px 12px", borderRadius: 12, flexShrink: 0,
+                border: `1.5px solid ${active ? C.copper : dayFilled ? C.sageLight : C.borderLight}`,
+                background: active ? C.copperGlow : dayFilled ? C.sageGlow : "transparent",
+                cursor: "pointer", textAlign: "center", transition: "all .2s" }}>
+              <div style={{ fontSize: 14 }}>{DAY_EMOJIS[i % DAY_EMOJIS.length]}</div>
+              <div style={{ fontFamily: F.body, fontSize: 10, fontWeight: active ? 600 : 400,
+                color: active ? C.copper : C.warmGray, marginTop: 2 }}>
+                {i === 0 ? "Go" : i === totalDays - 1 ? "Back" : `D${i + 1}`}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Occasion tabs for current day */}
+      <div style={{ padding: "4px 16px 12px" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {currentDayOccasions.map((occ, i) => {
+            const active = i === occIdx;
+            const typeInfo = OCCASION_TYPES.find(t => t.id === occ.type);
+            return (
+              <button key={occ.id} onClick={() => { setOccIdx(i); setSlotIdx(0); }}
+                style={{ padding: "6px 14px", borderRadius: 10, display: "flex", alignItems: "center", gap: 6,
+                  border: `1px solid ${active ? C.copper : C.borderLight}`,
+                  background: active ? C.copperGlow : C.warmWhite,
+                  cursor: "pointer", fontFamily: F.body, fontSize: 12, fontWeight: active ? 600 : 400,
+                  color: active ? C.copper : C.warmGray }}>
+                {typeInfo?.icon} {occ.label}
+                {currentDayOccasions.length > 1 && active && (
+                  <button onClick={(e) => { e.stopPropagation(); removeOccasion(i); }}
+                    style={{ background: "none", border: "none", cursor: "pointer", padding: 0,
+                      marginLeft: 4, color: C.softGray, display: "flex" }}>
+                    <X size={12} />
+                  </button>
+                )}
+              </button>
+            );
+          })}
+          <button onClick={() => setShowAddOccasion(!showAddOccasion)}
+            style={{ width: 32, height: 32, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center",
+              border: `1px dashed ${C.borderMedium}`, background: "transparent", cursor: "pointer", color: C.softGray }}>
+            <Plus size={14} />
+          </button>
         </div>
-      )}
+
+        {showAddOccasion && (
+          <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+            {OCCASION_TYPES.filter(t => !currentDayOccasions.find(o => o.type === t.id)).map(t => (
+              <button key={t.id} onClick={() => addOccasion(t.id)}
+                style={{ padding: "8px 14px", borderRadius: 10, border: `1px solid ${C.borderLight}`,
+                  background: C.warmWhite, cursor: "pointer", fontFamily: F.body, fontSize: 12, color: C.charcoal,
+                  display: "flex", alignItems: "center", gap: 6 }}>
+                {t.icon} {t.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Current slot */}
-      <div style={{ padding: "16px 20px 24px" }}>
+      <div style={{ padding: "8px 20px 24px" }}>
         <div style={{ textAlign: "center", marginBottom: 20 }}>
           <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center",
             width: 56, height: 56, borderRadius: 16,
@@ -1689,8 +1590,8 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, onSave, onExit }) {
             {currentSlot.label}
           </h2>
           <div style={{ fontFamily: F.body, fontSize: 13, color: C.softGray }}>
-            {currentSlot.optional && <span style={{ fontStyle: "italic" }}>optional · </span>}
-            {slotIdx + 1} of {totalSlots}
+            {dayEmoji} {dayLabel} · {currentOccasion?.label}
+            {currentSlot.optional && <span style={{ color: C.softGray, fontStyle: "italic" }}> · optional</span>}
           </div>
         </div>
 
@@ -1776,20 +1677,62 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, onSave, onExit }) {
       {/* Navigation */}
       <div style={{ padding: "12px 20px 32px", display: "flex", gap: 12,
         borderTop: `1px solid ${C.borderLight}`, background: "rgba(253,248,240,.95)" }}>
-        {slotIdx > 0 && (
+        {!isFirst && (
           <Btn v="secondary" sz="md" onClick={goPrev} style={{ flex: 0 }}>
             <ChevronLeft size={16} />
           </Btn>
         )}
-        {slotIdx < totalSlots - 1 ? (
+        {!isLast ? (
           <Btn v="primary" sz="md" onClick={goNext} style={{ flex: 1 }}>
             Next <ChevronRight size={16} />
           </Btn>
         ) : (
-          <Btn v="sage" sz="lg" onClick={handleDoneOutfit} style={{ flex: 1 }}>
-            <Check size={18} /> Done with this outfit
+          <Btn v="sage" sz="lg" onClick={handleFinish} style={{ flex: 1 }}>
+            <Sparkles size={18} /> Add outfits to my list
           </Btn>
         )}
+      </div>
+
+      {/* Summary panel at bottom */}
+      <div style={{ padding: "0 20px 24px" }}>
+        <details>
+          <summary style={{ fontFamily: F.body, fontSize: 12, fontWeight: 600, textTransform: "uppercase",
+            letterSpacing: ".06em", color: C.warmGray, cursor: "pointer", padding: "8px 0",
+            listStyle: "none", display: "flex", alignItems: "center", gap: 6 }}>
+            <ChevronRight size={14} /> Outfit summary so far
+          </summary>
+          <div style={{ marginTop: 8 }}>
+            {occasions.map((dayOccs, di) => {
+              const anyFilled = dayOccs.some(o => Object.values(o.slots).some(v => v));
+              if (!anyFilled) return null;
+              return (
+                <div key={di} style={{ marginBottom: 12 }}>
+                  <div style={{ fontFamily: F.body, fontSize: 11, fontWeight: 600, color: C.copper,
+                    textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 }}>
+                    {DAY_EMOJIS[di % DAY_EMOJIS.length]} {di === 0 ? "Travel" : di === totalDays - 1 ? "Last Day" : `Day ${di + 1}`}
+                  </div>
+                  {dayOccs.map((occ, oi) => {
+                    const filled = Object.entries(occ.slots).filter(([, v]) => v);
+                    if (!filled.length) return null;
+                    return (
+                      <div key={occ.id} style={{ background: C.warmWhite, borderRadius: 10, padding: "8px 12px",
+                        border: `1px solid ${C.borderLight}`, marginBottom: 4 }}>
+                        <div style={{ fontFamily: F.body, fontSize: 11, color: C.softGray, marginBottom: 4 }}>
+                          {OCCASION_TYPES.find(t => t.id === occ.type)?.icon} {occ.label}
+                        </div>
+                        {filled.map(([slotId, val]) => (
+                          <div key={slotId} style={{ fontFamily: F.body, fontSize: 12, color: C.charcoal, padding: "1px 0" }}>
+                            {OUTFIT_SLOTS.find(s => s.id === slotId)?.emoji} {val}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        </details>
       </div>
     </div>
   );
@@ -1910,27 +1853,24 @@ export default function PackPal() {
   if (outfitMode && activeTrip) {
     return <OutfitBuilder trip={activeTrip} wardrobe={wardrobe} setWardrobe={setWardrobe}
       onExit={() => setOutfitMode(false)}
-      onSave={(occasions, syncToList) => {
-        // Always save outfitPlan
-        setTrips(p => p.map(t => t.id === activeTrip.id ? { ...t, outfitPlan: occasions } : t));
-        setActiveTrip(p => ({ ...p, outfitPlan: occasions }));
-
-        // When syncing to list, add any new unique outfit items to packing list
-        if (syncToList) {
-          const outfitItems = collectUniqueOutfitItems(occasions);
-          const existing = new Set(activeTrip.items.map(i => i.name.toLowerCase()));
-          const newItems = outfitItems
-            .filter(item => !existing.has(item.name.toLowerCase()))
-            .map(item => ({
-              id: id(), name: item.name, category: "outfits", section: item.section,
-              packed: false, essential: false, ff: false, freq: 0, needsRefill: false
-            }));
-          if (newItems.length > 0) {
-            const updatedItems = [...activeTrip.items, ...newItems];
-            setTrips(p => p.map(t => t.id === activeTrip.id ? { ...t, items: updatedItems } : t));
-            setActiveTrip(p => ({ ...p, items: updatedItems }));
-          }
+      onComplete={(outfitItems, occasions) => {
+        // Add unique outfit items to packing list under "outfits" category
+        const existing = new Set(activeTrip.items.map(i => i.name.toLowerCase()));
+        const newItems = outfitItems
+          .filter(item => !existing.has(item.name.toLowerCase()))
+          .map(item => ({
+            id: id(), name: item.name, category: "outfits", section: item.section,
+            packed: false, essential: false, ff: false, freq: 0, needsRefill: false
+          }));
+        if (newItems.length > 0) {
+          const updatedItems = [...activeTrip.items, ...newItems];
+          setTrips(p => p.map(t => t.id === activeTrip.id ? { ...t, items: updatedItems, outfitPlan: occasions } : t));
+          setActiveTrip(p => ({ ...p, items: updatedItems, outfitPlan: occasions }));
+        } else {
+          setTrips(p => p.map(t => t.id === activeTrip.id ? { ...t, outfitPlan: occasions } : t));
+          setActiveTrip(p => ({ ...p, outfitPlan: occasions }));
         }
+        setOutfitMode(false);
       }} />;
   }
 
