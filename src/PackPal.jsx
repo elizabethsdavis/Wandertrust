@@ -1311,9 +1311,9 @@ const OUTFIT_SLOTS = [
 
 const DAY_EMOJIS = ["✈️", "☀️", "🌤️", "⭐", "🌸", "🎯", "💫", "🌊", "🏔️", "🎉", "🌺", "⚡", "🦋", "🌙", "🍂"];
 const OCCASION_TYPES = [
-  { id: "daytime", label: "Daytime / Explore", icon: "☀️" },
-  { id: "evening", label: "Evening / Dinner", icon: "🌙" },
-  { id: "activity", label: "Activity / Sport", icon: "🏃‍♀️" },
+  { id: "daytime", label: "Daytime", icon: "☀️" },
+  { id: "evening", label: "Evening", icon: "🌙" },
+  { id: "activity", label: "Activity", icon: "🏃‍♀️" },
   { id: "special", label: "Special Event", icon: "✨" },
 ];
 
@@ -1333,7 +1333,7 @@ function colorToHex(name) {
   return map[name] || C.copperLight;
 }
 
-function WardrobeCarousel({ slotId, wardrobe, onSelect, onCreateNew, selected }) {
+function WardrobeCarousel({ slotId, wardrobe, onSelect, selected, onRemoveItem }) {
   const items = (wardrobe[slotId] || []);
   const scrollRef = useRef(null);
 
@@ -1346,7 +1346,6 @@ function WardrobeCarousel({ slotId, wardrobe, onSelect, onCreateNew, selected })
       if (!colorMap[key]) colorMap[key] = [];
       colorMap[key].push(item);
     });
-    // Sort by group size descending
     return Object.entries(colorMap).sort((a, b) => b[1].length - a[1].length);
   }, [items]);
 
@@ -1361,30 +1360,45 @@ function WardrobeCarousel({ slotId, wardrobe, onSelect, onCreateNew, selected })
             const meta = parseItemMeta(item);
             const isSel = selected === item;
             return (
-              <button key={`${item}-${i}`} onClick={() => onSelect(item)}
-                style={{ minWidth: 130, maxWidth: 160, padding: "12px 14px", borderRadius: 14, flexShrink: 0,
-                  border: `2px solid ${isSel ? C.copper : C.borderLight}`,
-                  background: isSel ? C.copperGlow : C.warmWhite,
-                  cursor: "pointer", textAlign: "left", transition: "all .2s",
-                  transform: isSel ? "scale(1.02)" : "scale(1)",
-                  boxShadow: isSel ? `0 4px 16px rgba(193,127,89,.2)` : `0 1px 4px ${C.shadow}` }}>
-                {/* Color dot + brand */}
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                  {meta.color && <div style={{ width: 10, height: 10, borderRadius: 5,
-                    background: colorToHex(meta.color), border: meta.color === "white" ? `1px solid ${C.borderLight}` : "none" }} />}
-                  {meta.brand && <span style={{ fontFamily: F.body, fontSize: 9, fontWeight: 600, textTransform: "uppercase",
-                    letterSpacing: ".05em", color: C.softGray }}>{meta.brand}</span>}
-                </div>
-                <div style={{ fontFamily: F.body, fontSize: 13, fontWeight: isSel ? 600 : 400,
-                  color: C.charcoal, lineHeight: 1.3,
-                  overflow: "hidden", textOverflow: "ellipsis",
-                  display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
-                  {item}
-                </div>
-                {isSel && <div style={{ marginTop: 6 }}>
-                  <Check size={14} color={C.copper} />
-                </div>}
-              </button>
+              <div key={`${item}-${i}`} style={{ position: "relative", flexShrink: 0 }}>
+                <button onClick={() => onSelect(item)}
+                  style={{ minWidth: 130, maxWidth: 160, padding: "12px 14px", borderRadius: 14, width: "100%",
+                    border: `2px solid ${isSel ? C.copper : C.borderLight}`,
+                    background: isSel ? C.copperGlow : C.warmWhite,
+                    cursor: "pointer", textAlign: "left", transition: "all .2s",
+                    transform: isSel ? "scale(1.02)" : "scale(1)",
+                    boxShadow: isSel ? `0 4px 16px rgba(193,127,89,.2)` : `0 1px 4px ${C.shadow}` }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                    {meta.color && <div style={{ width: 10, height: 10, borderRadius: 5,
+                      background: colorToHex(meta.color), border: meta.color === "white" ? `1px solid ${C.borderLight}` : "none" }} />}
+                    {meta.brand && <span style={{ fontFamily: F.body, fontSize: 9, fontWeight: 600, textTransform: "uppercase",
+                      letterSpacing: ".05em", color: C.softGray }}>{meta.brand}</span>}
+                  </div>
+                  <div style={{ fontFamily: F.body, fontSize: 13, fontWeight: isSel ? 600 : 400,
+                    color: C.charcoal, lineHeight: 1.3,
+                    overflow: "hidden", textOverflow: "ellipsis",
+                    display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+                    {item}
+                  </div>
+                  {isSel && <div style={{ marginTop: 6 }}>
+                    <Check size={14} color={C.copper} />
+                  </div>}
+                </button>
+                {/* Remove from wardrobe */}
+                {onRemoveItem && !isSel && (
+                  <button onClick={(e) => { e.stopPropagation(); onRemoveItem(item); }}
+                    style={{ position: "absolute", top: -4, right: -4, width: 20, height: 20, borderRadius: 10,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      background: C.warmWhite, border: `1px solid ${C.borderLight}`,
+                      cursor: "pointer", color: C.softGray, padding: 0, transition: "all .15s",
+                      boxShadow: `0 1px 3px ${C.shadow}` }}
+                    onMouseEnter={e => { e.currentTarget.style.background = C.dangerGlow; e.currentTarget.style.color = C.danger; e.currentTarget.style.borderColor = C.danger; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = C.warmWhite; e.currentTarget.style.color = C.softGray; e.currentTarget.style.borderColor = C.borderLight; }}
+                    title="Remove from wardrobe">
+                    <X size={10} />
+                  </button>
+                )}
+              </div>
             );
           })}
         </div>
@@ -1425,20 +1439,28 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, onSave, onExit }) {
       slots: {}
     }]);
   });
+  const [dayNames, setDayNames] = useState(() => {
+    if (trip.outfitDayNames && trip.outfitDayNames.length === trip.days) return trip.outfitDayNames;
+    return Array.from({ length: trip.days }, (_, i) => i === 0 ? "Travel Day" : i === trip.days - 1 ? "Travel Home" : `Day ${i + 1}`);
+  });
   const [slotIdx, setSlotIdx] = useState(0);
   const [addingNew, setAddingNew] = useState(false);
   const [newItemVal, setNewItemVal] = useState("");
-  const [showAddOccasion, setShowAddOccasion] = useState(false);
   const [saveFlash, setSaveFlash] = useState("");
+  const [addingOccForDay, setAddingOccForDay] = useState(null); // index of day showing occasion picker
+  const [renamingDay, setRenamingDay] = useState(null); // index of day being renamed
+  const [renameVal, setRenameVal] = useState("");
+  const renameRef = useRef(null);
   const newRef = useRef(null);
 
   useEffect(() => { if (addingNew && newRef.current) newRef.current.focus(); }, [addingNew]);
+  useEffect(() => { if (renamingDay !== null && renameRef.current) { renameRef.current.focus(); renameRef.current.select(); } }, [renamingDay]);
 
   const totalDays = trip.days;
   const totalSlots = OUTFIT_SLOTS.length;
 
-  // Auto-save whenever occasions change
-  useEffect(() => { onSave(occasions, false); }, [occasions]);
+  // Auto-save whenever occasions or dayNames change
+  useEffect(() => { onSave(occasions, dayNames, false); }, [occasions, dayNames]);
 
   // Count completed outfits (has at least top + bottom filled)
   const completedOutfits = useMemo(() => {
@@ -1458,7 +1480,7 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, onSave, onExit }) {
   const currentOccasion = currentDayOccasions[occIdx];
   const currentSlot = OUTFIT_SLOTS[slotIdx];
 
-  const setSlotValue = (val) => {
+  const setSlotValue = (val, autoAdvance = false) => {
     const updated = [...occasions];
     updated[dayIdx] = [...updated[dayIdx]];
     updated[dayIdx][occIdx] = { ...updated[dayIdx][occIdx], slots: { ...updated[dayIdx][occIdx].slots, [currentSlot.id]: val } };
@@ -1466,16 +1488,10 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, onSave, onExit }) {
     if (val && !wardrobe[currentSlot.id]?.includes(val)) {
       setWardrobe(prev => ({ ...prev, [currentSlot.id]: [...(prev[currentSlot.id] || []), val] }));
     }
-  };
-
-  const addOccasion = (type) => {
-    const typeInfo = OCCASION_TYPES.find(t => t.id === type);
-    const updated = [...occasions];
-    updated[dayIdx] = [...updated[dayIdx], { id: id(), type, label: typeInfo?.label || type, slots: {} }];
-    setOccasions(updated);
-    setEditing({ dayIdx, occIdx: updated[dayIdx].length - 1 });
-    setSlotIdx(0);
-    setShowAddOccasion(false);
+    // Auto-advance to next slot after a short delay
+    if (val && autoAdvance && slotIdx < totalSlots - 1) {
+      setTimeout(() => setSlotIdx(s => s + 1), 350);
+    }
   };
 
   const removeOccasion = (di, oi) => {
@@ -1492,9 +1508,19 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, onSave, onExit }) {
     // Save + sync to packing list immediately
     setSaveFlash("Saved!");
     setTimeout(() => setSaveFlash(""), 1500);
-    onSave(occasions, true);
+    onSave(occasions, dayNames, true);
     setEditing(null);
     setSlotIdx(0);
+  };
+
+  const commitRename = () => {
+    if (renamingDay !== null && renameVal.trim()) {
+      const updated = [...dayNames];
+      updated[renamingDay] = renameVal.trim();
+      setDayNames(updated);
+    }
+    setRenamingDay(null);
+    setRenameVal("");
   };
 
   const goNext = () => {
@@ -1507,7 +1533,7 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, onSave, onExit }) {
   };
 
   const selectedValue = currentOccasion?.slots?.[currentSlot?.id] || "";
-  const dayLabel = (di) => di === 0 ? "Travel Day" : di === totalDays - 1 ? "Last Day" : `Day ${di + 1}`;
+  const dayLabel = (di) => dayNames[di] || (di === 0 ? "Travel Day" : di === totalDays - 1 ? "Last Day" : `Day ${di + 1}`);
   const dayEmoji = (di) => DAY_EMOJIS[di % DAY_EMOJIS.length];
 
   // ═══ HUB VIEW — shows all outfits as cards ═══
@@ -1541,7 +1567,26 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, onSave, onExit }) {
               <div style={{ fontFamily: F.body, fontSize: 11, fontWeight: 600, textTransform: "uppercase",
                 letterSpacing: ".06em", color: C.copper, marginBottom: 8, padding: "0 4px",
                 display: "flex", alignItems: "center", gap: 6 }}>
-                {dayEmoji(di)} {dayLabel(di)}
+                {dayEmoji(di)}
+                {renamingDay === di ? (
+                  <form onSubmit={(e) => { e.preventDefault(); commitRename(); }} style={{ display: "inline-flex", gap: 6 }}>
+                    <input ref={renameRef} value={renameVal} onChange={e => setRenameVal(e.target.value)}
+                      onBlur={commitRename} onKeyDown={e => { if (e.key === "Escape") { setRenamingDay(null); setRenameVal(""); } }}
+                      style={{ fontFamily: F.body, fontSize: 12, fontWeight: 600, color: C.copper, background: C.copperGlow,
+                        border: `1.5px solid ${C.copper}`, borderRadius: 8, padding: "3px 8px", outline: "none",
+                        textTransform: "uppercase", letterSpacing: ".06em", width: 140 }} />
+                  </form>
+                ) : (
+                  <button onClick={() => { setRenamingDay(di); setRenameVal(dayNames[di]); }}
+                    style={{ background: "none", border: "none", cursor: "pointer", padding: "2px 6px", borderRadius: 6,
+                      fontFamily: F.body, fontSize: 11, fontWeight: 600, textTransform: "uppercase",
+                      letterSpacing: ".06em", color: C.copper, transition: "all .15s" }}
+                    onMouseEnter={e => e.currentTarget.style.background = C.copperGlow}
+                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                    title="Tap to rename this day">
+                    {dayLabel(di)}
+                  </button>
+                )}
               </div>
 
               <div style={{ display: "grid", gap: 8 }}>
@@ -1550,62 +1595,126 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, onSave, onExit }) {
                   const hasTopBottom = occ.slots.top && occ.slots.bottom;
                   const typeInfo = OCCASION_TYPES.find(t => t.id === occ.type);
                   return (
-                    <button key={occ.id} onClick={() => { setEditing({ dayIdx: di, occIdx: oi }); setSlotIdx(0); }}
-                      style={{ display: "flex", alignItems: "flex-start", gap: 14, padding: "14px 16px", borderRadius: 16,
-                        background: C.warmWhite, border: `1.5px solid ${hasTopBottom ? C.sageLight : C.borderLight}`,
-                        cursor: "pointer", textAlign: "left", width: "100%", transition: "all .2s",
-                        boxShadow: `0 2px 8px ${C.shadow}` }}
-                      onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = `0 4px 12px ${C.shadowMed}`; }}
-                      onMouseLeave={e => { e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = `0 2px 8px ${C.shadow}`; }}>
-                      <div style={{ width: 40, height: 40, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center",
-                        background: hasTopBottom ? C.sageGlow : C.copperSubtle, flexShrink: 0 }}>
-                        {hasTopBottom ? <Check size={18} color={C.sage} /> : <Shirt size={18} color={C.copper} />}
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontFamily: F.body, fontSize: 13, fontWeight: 500, color: C.charcoal, marginBottom: 2 }}>
-                          {typeInfo?.icon} {occ.label}
+                    <div key={occ.id} style={{ position: "relative" }}>
+                      <button onClick={() => { setEditing({ dayIdx: di, occIdx: oi }); setSlotIdx(0); }}
+                        style={{ display: "flex", alignItems: "flex-start", gap: 14, padding: "14px 16px", borderRadius: 16,
+                          background: C.warmWhite, border: `1.5px solid ${hasTopBottom ? C.sageLight : C.borderLight}`,
+                          cursor: "pointer", textAlign: "left", width: "100%", transition: "all .2s",
+                          boxShadow: `0 2px 8px ${C.shadow}` }}
+                        onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = `0 4px 12px ${C.shadowMed}`; }}
+                        onMouseLeave={e => { e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = `0 2px 8px ${C.shadow}`; }}>
+                        <div style={{ width: 40, height: 40, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center",
+                          background: hasTopBottom ? C.sageGlow : C.copperSubtle, flexShrink: 0 }}>
+                          {hasTopBottom ? <Check size={18} color={C.sage} /> : <Shirt size={18} color={C.copper} />}
                         </div>
-                        {filled.length > 0 ? (
-                          <div style={{ fontFamily: F.body, fontSize: 12, color: C.warmGray, lineHeight: 1.5 }}>
-                            {filled.slice(0, 4).map(([slotId, val]) => (
-                              <span key={slotId}>{OUTFIT_SLOTS.find(s => s.id === slotId)?.emoji} {val}  </span>
-                            ))}
-                            {filled.length > 4 && <span style={{ color: C.softGray }}>+{filled.length - 4} more</span>}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontFamily: F.body, fontSize: 13, fontWeight: 500, color: C.charcoal, marginBottom: 2 }}>
+                            {typeInfo?.icon} {occ.label}
                           </div>
-                        ) : (
-                          <div style={{ fontFamily: F.body, fontSize: 12, color: C.softGray, fontStyle: "italic" }}>
-                            Tap to start building this outfit
-                          </div>
+                          {filled.length > 0 ? (
+                            <div style={{ fontFamily: F.body, fontSize: 12, color: C.warmGray, lineHeight: 1.5 }}>
+                              {filled.slice(0, 4).map(([slotId, val]) => (
+                                <span key={slotId}>{OUTFIT_SLOTS.find(s => s.id === slotId)?.emoji} {val}  </span>
+                              ))}
+                              {filled.length > 4 && <span style={{ color: C.softGray }}>+{filled.length - 4} more</span>}
+                            </div>
+                          ) : (
+                            <div style={{ fontFamily: F.body, fontSize: 12, color: C.softGray, fontStyle: "italic" }}>
+                              Tap to start building this outfit
+                            </div>
+                          )}
+                        </div>
+                        <ChevronRight size={16} color={C.softGray} style={{ marginTop: 4 }} />
+                      </button>
+                      {/* Outfit actions */}
+                      <div style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 4 }}>
+                        {filled.length > 0 && (
+                          <button onClick={(e) => {
+                            e.stopPropagation();
+                            // Duplicate to next available day
+                            const targetDay = occasions.findIndex((d, idx) => idx > di && d.length < 4);
+                            if (targetDay >= 0) {
+                              const updated = [...occasions];
+                              updated[targetDay] = [...updated[targetDay], { ...occ, id: id() }];
+                              setOccasions(updated);
+                              setSaveFlash(`Copied to ${dayLabel(targetDay)}`);
+                              setTimeout(() => setSaveFlash(""), 1500);
+                            } else {
+                              setSaveFlash("No room to copy");
+                              setTimeout(() => setSaveFlash(""), 1500);
+                            }
+                          }}
+                            title="Copy to another day"
+                            style={{ width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center",
+                              border: "none", background: "rgba(255,255,255,.8)", cursor: "pointer", color: C.softGray,
+                              transition: "all .15s" }}
+                            onMouseEnter={e => { e.currentTarget.style.background = C.copperGlow; e.currentTarget.style.color = C.copper; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,.8)"; e.currentTarget.style.color = C.softGray; }}>
+                            <Copy size={13} />
+                          </button>
+                        )}
+                        {dayOccs.length > 1 && (
+                          <button onClick={(e) => {
+                            e.stopPropagation();
+                            removeOccasion(di, oi);
+                          }}
+                            title="Remove this outfit"
+                            style={{ width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center",
+                              border: "none", background: "rgba(255,255,255,.8)", cursor: "pointer", color: C.softGray,
+                              transition: "all .15s" }}
+                            onMouseEnter={e => { e.currentTarget.style.background = C.dangerGlow; e.currentTarget.style.color = C.danger; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,.8)"; e.currentTarget.style.color = C.softGray; }}>
+                            <Trash2 size={13} />
+                          </button>
                         )}
                       </div>
-                      <ChevronRight size={16} color={C.softGray} style={{ marginTop: 4 }} />
-                    </button>
+                    </div>
                   );
                 })}
 
                 {/* Add another occasion to this day */}
-                <button onClick={() => {
-                  setEditing({ dayIdx: di, occIdx: dayOccs.length });
-                  setShowAddOccasion(true);
-                  // temporarily set editing so addOccasion works on the right day
-                  const typeInfo = OCCASION_TYPES.find(t => !dayOccs.find(o => o.type === t.id));
-                  if (typeInfo) {
-                    const updated = [...occasions];
-                    updated[di] = [...updated[di], { id: id(), type: typeInfo.id, label: typeInfo.label, slots: {} }];
-                    setOccasions(updated);
-                    setEditing({ dayIdx: di, occIdx: updated[di].length - 1 });
-                    setSlotIdx(0);
-                    setShowAddOccasion(false);
-                  }
-                }}
-                  style={{ padding: "12px 16px", borderRadius: 14, border: `2px dashed ${C.borderMedium}`,
-                    background: "transparent", cursor: "pointer", display: "flex", alignItems: "center",
-                    justifyContent: "center", gap: 8, fontFamily: F.body, fontSize: 13, color: C.copper,
-                    transition: "all .15s" }}
-                  onMouseEnter={e => e.currentTarget.style.background = C.copperSubtle}
-                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                  <Plus size={14} /> Add outfit for {dayLabel(di).toLowerCase()}
-                </button>
+                {addingOccForDay === di ? (
+                  <div style={{ padding: "12px 16px", borderRadius: 14, border: `1.5px solid ${C.borderLight}`,
+                    background: C.warmWhite }}>
+                    <div style={{ fontFamily: F.body, fontSize: 12, fontWeight: 500, color: C.charcoal, marginBottom: 10 }}>
+                      What kind of outfit?
+                    </div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {OCCASION_TYPES.map(t => (
+                        <button key={t.id} onClick={() => {
+                          const updated = [...occasions];
+                          updated[di] = [...updated[di], { id: id(), type: t.id, label: t.label, slots: {} }];
+                          setOccasions(updated);
+                          setEditing({ dayIdx: di, occIdx: updated[di].length - 1 });
+                          setSlotIdx(0);
+                          setAddingOccForDay(null);
+                        }}
+                          style={{ padding: "8px 14px", borderRadius: 10, border: `1px solid ${C.borderLight}`,
+                            background: C.cream, cursor: "pointer", fontFamily: F.body, fontSize: 12, color: C.charcoal,
+                            display: "flex", alignItems: "center", gap: 6, transition: "all .15s" }}
+                          onMouseEnter={e => e.currentTarget.style.background = C.copperGlow}
+                          onMouseLeave={e => e.currentTarget.style.background = C.cream}>
+                          {t.icon} {t.label}
+                        </button>
+                      ))}
+                    </div>
+                    <button onClick={() => setAddingOccForDay(null)}
+                      style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.body,
+                        fontSize: 12, color: C.softGray, marginTop: 8, padding: "4px 0" }}>
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button onClick={() => setAddingOccForDay(di)}
+                    style={{ padding: "12px 16px", borderRadius: 14, border: `2px dashed ${C.borderMedium}`,
+                      background: "transparent", cursor: "pointer", display: "flex", alignItems: "center",
+                      justifyContent: "center", gap: 8, fontFamily: F.body, fontSize: 13, color: C.copper,
+                      transition: "all .15s" }}
+                    onMouseEnter={e => e.currentTarget.style.background = C.copperSubtle}
+                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                    <Plus size={14} /> Add outfit for {dayLabel(di).toLowerCase()}
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -1614,7 +1723,7 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, onSave, onExit }) {
         {/* Bottom bar */}
         <div style={{ padding: "16px 20px 32px", borderTop: `1px solid ${C.borderLight}`,
           background: "rgba(253,248,240,.95)", position: "sticky", bottom: 0 }}>
-          <Btn v="sage" sz="lg" onClick={() => { onSave(occasions, true); onExit(); }} style={{ width: "100%" }}>
+          <Btn v="sage" sz="lg" onClick={() => { onSave(occasions, dayNames, true); onExit(); }} style={{ width: "100%" }}>
             <Sparkles size={18} /> Done — sync to packing list
           </Btn>
           <div style={{ fontFamily: F.body, fontSize: 11, color: C.softGray, textAlign: "center", marginTop: 8 }}>
@@ -1708,6 +1817,29 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, onSave, onExit }) {
           })}
         </div>
 
+        {/* Mini outfit preview — what you've picked so far */}
+        {(() => {
+          const pickedSlots = OUTFIT_SLOTS.filter(s => currentOccasion?.slots?.[s.id]).map(s => ({
+            ...s, val: currentOccasion.slots[s.id]
+          }));
+          return pickedSlots.length > 0 && (
+            <div style={{ display: "flex", gap: 6, justifyContent: "center", flexWrap: "wrap", marginBottom: 16 }}>
+              {pickedSlots.map(s => (
+                <div key={s.id} style={{ padding: "4px 10px", borderRadius: 8,
+                  background: s.id === currentSlot.id ? C.copperGlow : C.sageGlow,
+                  border: `1px solid ${s.id === currentSlot.id ? C.copper + "30" : "rgba(139,168,136,.15)"}`,
+                  fontFamily: F.body, fontSize: 11, color: C.charcoal, maxWidth: 120,
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  cursor: "pointer" }}
+                  onClick={() => setSlotIdx(OUTFIT_SLOTS.findIndex(os => os.id === s.id))}
+                  title={s.val}>
+                  {s.emoji} {s.val}
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+
         {/* Selected value display */}
         {selectedValue && (
           <div style={{ background: C.sageGlow, borderRadius: 14, padding: "12px 18px",
@@ -1733,12 +1865,13 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, onSave, onExit }) {
             </div>
           )}
           <WardrobeCarousel slotId={currentSlot.id} wardrobe={wardrobe}
-            onSelect={(item) => setSlotValue(item)} selected={selectedValue} />
+            onSelect={(item) => setSlotValue(item, true)} selected={selectedValue}
+            onRemoveItem={(item) => setWardrobe(prev => ({ ...prev, [currentSlot.id]: (prev[currentSlot.id] || []).filter(i => i !== item) }))} />
         </div>
 
         {/* Add new item */}
         {addingNew ? (
-          <form onSubmit={(e) => { e.preventDefault(); if (newItemVal.trim()) { setSlotValue(newItemVal.trim()); setNewItemVal(""); setAddingNew(false); } }}
+          <form onSubmit={(e) => { e.preventDefault(); if (newItemVal.trim()) { setSlotValue(newItemVal.trim(), true); setNewItemVal(""); setAddingNew(false); } }}
             style={{ display: "flex", gap: 10 }}>
             <input ref={newRef} value={newItemVal} onChange={e => setNewItemVal(e.target.value)}
               placeholder={currentSlot.placeholder}
@@ -1747,7 +1880,7 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, onSave, onExit }) {
                 border: `1.5px solid ${C.borderMedium}`, borderRadius: 12,
                 background: C.warmWhite, outline: "none", color: C.charcoal }}
               onFocus={e => e.target.style.borderColor = C.copper} />
-            <Btn v="primary" sz="sm" onClick={() => { if (newItemVal.trim()) { setSlotValue(newItemVal.trim()); setNewItemVal(""); setAddingNew(false); } }}>
+            <Btn v="primary" sz="sm" onClick={() => { if (newItemVal.trim()) { setSlotValue(newItemVal.trim(), true); setNewItemVal(""); setAddingNew(false); } }}>
               Add
             </Btn>
           </form>
@@ -1910,26 +2043,41 @@ export default function PackPal() {
   if (outfitMode && activeTrip) {
     return <OutfitBuilder trip={activeTrip} wardrobe={wardrobe} setWardrobe={setWardrobe}
       onExit={() => setOutfitMode(false)}
-      onSave={(occasions, syncToList) => {
-        // Always save outfitPlan
-        setTrips(p => p.map(t => t.id === activeTrip.id ? { ...t, outfitPlan: occasions } : t));
-        setActiveTrip(p => ({ ...p, outfitPlan: occasions }));
-
-        // When syncing to list, add any new unique outfit items to packing list
+      onSave={(occasions, dayNames, syncToList) => {
         if (syncToList) {
+          // Sync: save outfitPlan AND add/remove outfit items from packing list atomically
           const outfitItems = collectUniqueOutfitItems(occasions);
-          const existing = new Set(activeTrip.items.map(i => i.name.toLowerCase()));
-          const newItems = outfitItems
-            .filter(item => !existing.has(item.name.toLowerCase()))
-            .map(item => ({
-              id: id(), name: item.name, category: "outfits", section: item.section,
-              packed: false, essential: false, ff: false, freq: 0, needsRefill: false
-            }));
-          if (newItems.length > 0) {
-            const updatedItems = [...activeTrip.items, ...newItems];
-            setTrips(p => p.map(t => t.id === activeTrip.id ? { ...t, items: updatedItems } : t));
-            setActiveTrip(p => ({ ...p, items: updatedItems }));
-          }
+          const outfitNames = new Set(outfitItems.map(i => i.name.toLowerCase()));
+          setTrips(p => p.map(t => {
+            if (t.id !== activeTrip.id) return t;
+            // Keep non-outfit items + update outfit items to match current plan
+            const nonOutfit = t.items.filter(i => i.category !== "outfits");
+            const existingOutfit = t.items.filter(i => i.category === "outfits");
+            const existingNames = new Set(existingOutfit.map(i => i.name.toLowerCase()));
+            // Keep existing outfit items that are still in the plan (preserves packed state)
+            const kept = existingOutfit.filter(i => outfitNames.has(i.name.toLowerCase()));
+            // Add new outfit items not yet in the list
+            const brandNew = outfitItems
+              .filter(item => !existingNames.has(item.name.toLowerCase()))
+              .map(item => ({ id: id(), name: item.name, category: "outfits", section: item.section,
+                packed: false, essential: false, ff: false, freq: 0, needsRefill: false }));
+            return { ...t, outfitPlan: occasions, outfitDayNames: dayNames, items: [...nonOutfit, ...kept, ...brandNew] };
+          }));
+          setActiveTrip(p => {
+            const nonOutfit = p.items.filter(i => i.category !== "outfits");
+            const existingOutfit = p.items.filter(i => i.category === "outfits");
+            const existingNames = new Set(existingOutfit.map(i => i.name.toLowerCase()));
+            const kept = existingOutfit.filter(i => outfitNames.has(i.name.toLowerCase()));
+            const brandNew = outfitItems
+              .filter(item => !existingNames.has(item.name.toLowerCase()))
+              .map(item => ({ id: id(), name: item.name, category: "outfits", section: item.section,
+                packed: false, essential: false, ff: false, freq: 0, needsRefill: false }));
+            return { ...p, outfitPlan: occasions, outfitDayNames: dayNames, items: [...nonOutfit, ...kept, ...brandNew] };
+          });
+        } else {
+          // Background auto-save: just persist plan, don't touch items
+          setTrips(p => p.map(t => t.id === activeTrip.id ? { ...t, outfitPlan: occasions, outfitDayNames: dayNames } : t));
+          setActiveTrip(p => ({ ...p, outfitPlan: occasions, outfitDayNames: dayNames }));
         }
       }} />;
   }
