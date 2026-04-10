@@ -699,6 +699,7 @@ function genList(types, days) {
   const items = [];
   const ts = Array.isArray(types) ? types : [types];
   Object.entries(CORE).forEach(([catId, sections]) => {
+    if (catId === "checkout") return; // OTD items handled separately via trip.otdItems
     Object.entries(sections).forEach(([sec, arr]) => {
       arr.forEach((it) => {
         if (it.cond && !it.cond.some((t) => ts.includes(t)) && it.f < 0.5) return;
@@ -718,6 +719,27 @@ function genList(types, days) {
       });
     }
   });
+  return items;
+}
+
+// Generate trip-specific OTD items by merging global defaults with checkout CORE data
+function genTripOtd(globalOtdItems, tripTypes) {
+  const ts = Array.isArray(tripTypes) ? tripTypes : [tripTypes];
+  // Start with a copy of the global defaults
+  const items = globalOtdItems.map(i => ({ ...i }));
+  const nameSet = new Set(items.map(i => i.name.toLowerCase()));
+  // Add any checkout CORE items not already in the list
+  if (CORE.checkout) {
+    Object.values(CORE.checkout).forEach(arr => {
+      arr.forEach(it => {
+        if (it.cond && !it.cond.some(t => ts.includes(t))) return;
+        if (!nameSet.has(it.name.toLowerCase())) {
+          items.push({ name: it.name, emoji: "📌" });
+          nameSet.add(it.name.toLowerCase());
+        }
+      });
+    });
+  }
   return items;
 }
 
@@ -1618,7 +1640,7 @@ function OutTheDoor({ trip, otdItems, setOtdItems, otdChecked, setOtdChecked, on
 
         <div style={{ padding: "16px 16px 120px" }}>
           <p style={{ fontFamily: F.body, fontSize: 13, color: C.softGray, marginBottom: 16, padding: "0 4px" }}>
-            Customize your out-the-door checklist. These items persist across all trips.
+            Customize your out-the-door checklist for this trip. Edit the global defaults from the homepage.
           </p>
 
           {otdItems.map((item, i) => (
@@ -1671,7 +1693,7 @@ function OutTheDoor({ trip, otdItems, setOtdItems, otdChecked, setOtdChecked, on
           )}
 
           {/* Reset to defaults */}
-          <button onClick={() => { if (confirm("Reset to default checklist? Custom items will be lost.")) { setOtdItems(DEFAULT_OTD_ITEMS); setOtdChecked({}); } }}
+          <button onClick={() => { if (confirm("Reset to global defaults? Trip-specific edits will be lost.")) { setOtdItems(DEFAULT_OTD_ITEMS); setOtdChecked({}); } }}
             style={{ width: "100%", padding: "12px", borderRadius: 10, marginTop: 16,
               border: "none", background: "transparent", cursor: "pointer",
               fontFamily: F.body, fontSize: 12, color: C.softGray, textAlign: "center" }}>
@@ -1784,6 +1806,98 @@ function OutTheDoor({ trip, otdItems, setOtdItems, otdChecked, setOtdChecked, on
             })}
           </div>
         </details>
+      </div>
+    </div>
+  );
+}
+
+// ── Global OTD Editor ──
+function GlobalOtdEditor({ items, setItems, onExit }) {
+  const [adding, setAdding] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newEmoji, setNewEmoji] = useState("");
+  const addRef = useRef(null);
+  useEffect(() => { if (adding && addRef.current) addRef.current.focus(); }, [adding]);
+
+  const doAdd = () => {
+    if (newName.trim()) {
+      setItems(prev => [...prev, { name: newName.trim(), emoji: newEmoji || "📌" }]);
+      setNewName(""); setNewEmoji(""); setAdding(false);
+      haptic("success");
+    }
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", background: `linear-gradient(180deg, #FFF8F2 0%, ${C.cream} 100%)` }}>
+      <div style={{ padding: "16px 20px", display: "flex", alignItems: "center", gap: 12,
+        borderBottom: `1px solid ${C.borderLight}`, background: "rgba(255,248,242,.95)", backdropFilter: "blur(10px)" }}>
+        <button onClick={onExit} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
+          <ArrowLeft size={20} color={C.warmGray} />
+        </button>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontFamily: F.body, fontSize: 15, fontWeight: 600, color: C.charcoal }}>Out the Door Defaults</div>
+          <div style={{ fontFamily: F.body, fontSize: 11, color: C.softGray }}>{items.length} items · Starting list for every new trip</div>
+        </div>
+      </div>
+
+      <div style={{ padding: "16px 16px 120px" }}>
+        <p style={{ fontFamily: F.body, fontSize: 13, color: C.warmGray, marginBottom: 16, padding: "0 4px", lineHeight: 1.5 }}>
+          This is your global out-the-door checklist. New trips start with a copy of this list — you can then customize it per trip.
+        </p>
+
+        {items.map((item, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", marginBottom: 4,
+            borderRadius: 12, background: C.warmWhite, border: `1px solid ${C.borderLight}` }}>
+            <span style={{ fontSize: 20, flexShrink: 0 }}>{item.emoji}</span>
+            <span style={{ flex: 1, fontFamily: F.body, fontSize: 14, color: C.charcoal }}>{item.name}</span>
+            <button onClick={() => setItems(prev => prev.filter((_, j) => j !== i))}
+              style={{ background: "none", border: "none", cursor: "pointer", padding: 4, borderRadius: 6,
+                display: "flex", color: C.softGray, transition: "color .15s" }}
+              onMouseEnter={e => e.currentTarget.style.color = C.danger}
+              onMouseLeave={e => e.currentTarget.style.color = C.softGray}>
+              <X size={16} />
+            </button>
+          </div>
+        ))}
+
+        {adding ? (
+          <form onSubmit={e => { e.preventDefault(); doAdd(); }}
+            style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
+            <button onClick={() => {
+              const emojis = ["📌","🔑","📱","💳","🎒","💊","🎧","🧴","📄","🧥","☂️","🔌","💻","📷","🪥","✈️"];
+              setNewEmoji(emojis[Math.floor(Math.random() * emojis.length)]);
+            }} type="button"
+              style={{ width: 40, height: 40, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center",
+                border: `1.5px solid ${C.borderMedium}`, background: C.cream, cursor: "pointer", fontSize: 18, flexShrink: 0 }}>
+              {newEmoji || "📌"}
+            </button>
+            <input ref={addRef} value={newName} onChange={e => setNewName(e.target.value)}
+              placeholder="e.g. Laptop charger, Travel pillow..."
+              onBlur={() => { if (!newName.trim()) setTimeout(() => setAdding(false), 150); }}
+              style={{ flex: 1, fontFamily: F.body, fontSize: 14, padding: "10px 14px",
+                border: `1.5px solid ${C.borderMedium}`, borderRadius: 10,
+                background: C.warmWhite, outline: "none", color: C.charcoal }}
+              onFocus={e => e.target.style.borderColor = C.copper} />
+            <Btn v="primary" sz="sm" onClick={doAdd}>Add</Btn>
+          </form>
+        ) : (
+          <button onClick={() => setAdding(true)}
+            style={{ width: "100%", padding: "14px 16px", borderRadius: 14, marginTop: 8,
+              border: `2px dashed ${C.borderMedium}`, background: "transparent",
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              fontFamily: F.body, fontSize: 14, color: C.copper, transition: "all .15s" }}
+            onMouseEnter={e => e.currentTarget.style.background = C.copperSubtle}
+            onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+            <Plus size={16} /> Add item
+          </button>
+        )}
+
+        <button onClick={() => { if (confirm("Reset to factory defaults? Your customizations will be lost.")) { setItems(DEFAULT_OTD_ITEMS); } }}
+          style={{ width: "100%", padding: "12px", borderRadius: 10, marginTop: 16,
+            border: "none", background: "transparent", cursor: "pointer",
+            fontFamily: F.body, fontSize: 12, color: C.softGray, textAlign: "center" }}>
+          Reset to factory defaults
+        </button>
       </div>
     </div>
   );
@@ -2071,10 +2185,10 @@ const OUTFIT_SLOTS = [
   { id: "layer", label: "Layer / Jacket", icon: <Shield size={18} />, emoji: "🧥", color: "#8B7355", optional: true, placeholder: "e.g. Black leather jacket, Cream puffer..." },
   { id: "shoes", label: "Shoes", icon: <Footprints size={18} />, emoji: "👟", color: C.sage, placeholder: "e.g. Black Doc Martens, Gold sandals..." },
   { id: "bag", label: "Bag / Purse", icon: <ShoppingBag size={18} />, emoji: "👜", color: "#C47EAA", placeholder: "e.g. Black Longchamp, Gold clutch..." },
-  { id: "necklace", label: "Necklace(s)", icon: <Gem size={18} />, emoji: "📿", color: C.copperLight, optional: true, placeholder: "e.g. Gold necklaces (3), Faux diamond..." },
-  { id: "bracelet", label: "Bracelet(s)", icon: <Watch size={18} />, emoji: "💎", color: C.amber, optional: true, placeholder: "e.g. Gold bracelets (3), Sparkly bracelets..." },
-  { id: "eyewear", label: "Eyewear", icon: <Eye size={18} />, emoji: "🕶️", color: C.teal, optional: true, placeholder: "e.g. Artsy Sunglasses, Gold Eyeglasses..." },
-  { id: "hair", label: "Hair Accessory", icon: <Star size={18} />, emoji: "✨", color: C.lavender, optional: true, placeholder: "e.g. Hair clips, Headband, Scarf..." },
+  { id: "necklace", label: "Necklace(s)", icon: <Gem size={18} />, emoji: "📿", color: C.copperLight, optional: true, multi: true, placeholder: "e.g. Gold layered necklace, Faux diamond pendant..." },
+  { id: "bracelet", label: "Bracelet(s)", icon: <Watch size={18} />, emoji: "💎", color: C.amber, optional: true, multi: true, placeholder: "e.g. Gold cuff bracelet, Sparkly bangle..." },
+  { id: "eyewear", label: "Eyewear", icon: <Eye size={18} />, emoji: "🕶️", color: C.teal, optional: true, multi: true, placeholder: "e.g. Artsy Sunglasses, Gold Eyeglasses..." },
+  { id: "hair", label: "Hair Accessory", icon: <Star size={18} />, emoji: "✨", color: C.lavender, optional: true, multi: true, placeholder: "e.g. Hair clips, Headband, Scarf..." },
 ];
 
 const DAY_EMOJIS = ["✈️", "☀️", "🌤️", "⭐", "🌸", "🎯", "💫", "🌊", "🏔️", "🎉", "🌺", "⚡", "🦋", "🌙", "🍂"];
@@ -2104,6 +2218,8 @@ function colorToHex(name) {
 function WardrobeCarousel({ slotId, wardrobe, onSelect, selected, onRemoveItem }) {
   const items = (wardrobe[slotId] || []);
   const scrollRef = useRef(null);
+  // selected can be a string (single) or array (multi)
+  const selArr = Array.isArray(selected) ? selected : selected ? [selected] : [];
 
   // Group by color for visual organization
   const grouped = useMemo(() => {
@@ -2126,7 +2242,7 @@ function WardrobeCarousel({ slotId, wardrobe, onSelect, selected, onRemoveItem }
           scrollBehavior: "smooth", WebkitOverflowScrolling: "touch" }}>
           {allItems.map((item, i) => {
             const meta = parseItemMeta(item);
-            const isSel = selected === item;
+            const isSel = selArr.includes(item);
             return (
               <div key={`${item}-${i}`} style={{ position: "relative", flexShrink: 0 }}>
                 <button onClick={() => onSelect(item)}
@@ -2187,9 +2303,13 @@ function collectUniqueOutfitItems(occasions) {
   occasions.forEach((dayOccs) => {
     dayOccs.forEach((occ) => {
       Object.entries(occ.slots).forEach(([slotId, val]) => {
-        if (val && !uniqueItems.has(val.toLowerCase())) {
-          uniqueItems.set(val.toLowerCase(), { name: val, section: slotToSection(slotId) });
-        }
+        // Handle multi-select (array) and single (string) values
+        const values = Array.isArray(val) ? val : val ? [val] : [];
+        values.forEach(v => {
+          if (v && !uniqueItems.has(v.toLowerCase())) {
+            uniqueItems.set(v.toLowerCase(), { name: v, section: slotToSection(slotId) });
+          }
+        });
       });
     });
   });
@@ -2234,6 +2354,11 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, customOccasions, setCustom
   const [renamingDay, setRenamingDay] = useState(null); // index of day being renamed
   const [renamingOcc, setRenamingOcc] = useState(false); // whether renaming the current occasion
   const [renameVal, setRenameVal] = useState("");
+  const [dayEmojiMap, setDayEmojiMap] = useState(() => trip.dayEmojis || {});
+  const [editingDayEmoji, setEditingDayEmoji] = useState(null);
+  const [dayEmojiVal, setDayEmojiVal] = useState("");
+  const [editingOccEmoji, setEditingOccEmoji] = useState(null);
+  const [occEmojiVal, setOccEmojiVal] = useState("");
   const renameRef = useRef(null);
   const occRenameRef = useRef(null);
   const newRef = useRef(null);
@@ -2246,8 +2371,8 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, customOccasions, setCustom
   const totalDays = trip.days;
   const totalSlots = OUTFIT_SLOTS.length;
 
-  // Auto-save whenever occasions or dayNames change
-  useEffect(() => { onSave(occasions, dayNames, false); }, [occasions, dayNames]);
+  // Auto-save whenever occasions, dayNames, or dayEmojiMap change
+  useEffect(() => { onSave(occasions, dayNames, false, dayEmojiMap); }, [occasions, dayNames, dayEmojiMap]);
 
   // Count completed outfits (has at least top + bottom filled)
   const completedOutfits = useMemo(() => {
@@ -2268,23 +2393,33 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, customOccasions, setCustom
   const currentSlot = OUTFIT_SLOTS[slotIdx];
 
   const setSlotValue = (val, autoAdvance = false) => {
+    const isMulti = currentSlot.multi;
     const updated = [...occasions];
     updated[dayIdx] = [...updated[dayIdx]];
-    updated[dayIdx][occIdx] = { ...updated[dayIdx][occIdx], slots: { ...updated[dayIdx][occIdx].slots, [currentSlot.id]: val } };
+    if (isMulti && val) {
+      // Multi-select: toggle item in array
+      const prev = updated[dayIdx][occIdx].slots[currentSlot.id];
+      const arr = Array.isArray(prev) ? [...prev] : prev ? [prev] : [];
+      const idx = arr.indexOf(val);
+      if (idx >= 0) { arr.splice(idx, 1); } else { arr.push(val); }
+      updated[dayIdx][occIdx] = { ...updated[dayIdx][occIdx], slots: { ...updated[dayIdx][occIdx].slots, [currentSlot.id]: arr.length ? arr : "" } };
+    } else {
+      updated[dayIdx][occIdx] = { ...updated[dayIdx][occIdx], slots: { ...updated[dayIdx][occIdx].slots, [currentSlot.id]: val } };
+    }
     setOccasions(updated);
     if (val) haptic("light");
     if (val && !wardrobe[currentSlot.id]?.includes(val)) {
       setWardrobe(prev => ({ ...prev, [currentSlot.id]: [...(prev[currentSlot.id] || []), val] }));
     }
-    // Auto-advance to next slot after a short delay
-    if (val && autoAdvance && slotIdx < totalSlots - 1) {
+    // Auto-advance only for single-select
+    if (val && autoAdvance && !isMulti && slotIdx < totalSlots - 1) {
       setTimeout(() => setSlotIdx(s => s + 1), 350);
     }
   };
 
   const pickOccasionType = (di, typeId, label, icon) => {
     const updated = [...occasions];
-    updated[di] = [...updated[di], { id: id(), type: typeId, label: label, slots: {} }];
+    updated[di] = [...updated[di], { id: id(), type: typeId, label: label, icon: icon, slots: {} }];
     setOccasions(updated);
     setEditing({ dayIdx: di, occIdx: updated[di].length - 1 });
     setSlotIdx(0);
@@ -2322,7 +2457,7 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, customOccasions, setCustom
     // Save + sync to packing list immediately
     setSaveFlash("Saved!");
     setTimeout(() => setSaveFlash(""), 1500);
-    onSave(occasions, dayNames, true);
+    onSave(occasions, dayNames, true, dayEmojiMap);
     haptic("success");
     // Check if this outfit had all slots filled
     if (editing && currentOccasion) {
@@ -2368,9 +2503,11 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, customOccasions, setCustom
     if (slotIdx > 0) setSlotIdx(s => s - 1);
   };
 
-  const selectedValue = currentOccasion?.slots?.[currentSlot?.id] || "";
+  const rawSlotVal = currentOccasion?.slots?.[currentSlot?.id] || "";
+  const selectedValue = currentSlot?.multi ? (Array.isArray(rawSlotVal) ? rawSlotVal : rawSlotVal ? [rawSlotVal] : []) : rawSlotVal;
+  const selectedIsMulti = currentSlot?.multi;
   const dayLabel = (di) => dayNames[di] || (di === 0 ? "Travel Day" : di === totalDays - 1 ? "Last Day" : `Day ${di + 1}`);
-  const dayEmoji = (di) => DAY_EMOJIS[di % DAY_EMOJIS.length];
+  const dayEmoji = (di) => dayEmojiMap[di] || DAY_EMOJIS[di % DAY_EMOJIS.length];
 
   // ═══ HUB VIEW — shows all outfits as cards ═══
   if (!editing) {
@@ -2403,7 +2540,31 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, customOccasions, setCustom
               <div style={{ fontFamily: F.body, fontSize: 11, fontWeight: 600, textTransform: "uppercase",
                 letterSpacing: ".06em", color: C.copper, marginBottom: 8, padding: "0 4px",
                 display: "flex", alignItems: "center", gap: 6 }}>
-                {dayEmoji(di)}
+                {editingDayEmoji === di ? (
+                  <span style={{ position: "relative" }}>
+                    <input value={dayEmojiVal} onChange={e => setDayEmojiVal(e.target.value.slice(-2))}
+                      autoFocus
+                      onBlur={() => {
+                        if (dayEmojiVal) setDayEmojiMap(prev => ({ ...prev, [di]: dayEmojiVal }));
+                        setEditingDayEmoji(null); setDayEmojiVal("");
+                      }}
+                      onKeyDown={e => {
+                        if (e.key === "Enter") { if (dayEmojiVal) setDayEmojiMap(prev => ({ ...prev, [di]: dayEmojiVal })); setEditingDayEmoji(null); setDayEmojiVal(""); }
+                        if (e.key === "Escape") { setEditingDayEmoji(null); setDayEmojiVal(""); }
+                      }}
+                      style={{ width: 36, fontSize: 16, textAlign: "center", padding: "2px 4px", borderRadius: 6,
+                        border: `1.5px solid ${C.copper}`, background: C.copperGlow, outline: "none" }} />
+                  </span>
+                ) : (
+                  <button onClick={() => { setEditingDayEmoji(di); setDayEmojiVal(dayEmoji(di)); }}
+                    style={{ background: "none", border: "none", cursor: "pointer", padding: "1px 2px", borderRadius: 4,
+                      fontSize: 14, transition: "all .15s" }}
+                    onMouseEnter={e => e.currentTarget.style.background = C.copperGlow}
+                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                    title="Tap to change emoji">
+                    {dayEmoji(di)}
+                  </button>
+                )}
                 {renamingDay === di ? (
                   <form onSubmit={(e) => { e.preventDefault(); commitRename(); }} style={{ display: "inline-flex", gap: 6 }}>
                     <input ref={renameRef} value={renameVal} onChange={e => setRenameVal(e.target.value)}
@@ -2427,7 +2588,7 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, customOccasions, setCustom
 
               <div style={{ display: "grid", gap: 8 }}>
                 {dayOccs.map((occ, oi) => {
-                  const filled = Object.entries(occ.slots).filter(([, v]) => v);
+                  const filled = Object.entries(occ.slots).filter(([, v]) => Array.isArray(v) ? v.length > 0 : !!v);
                   const hasTopBottom = occ.slots.top && occ.slots.bottom;
                   const typeInfo = allOccasionTypes.find(t => t.id === occ.type);
                   return (
@@ -2444,14 +2605,38 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, customOccasions, setCustom
                           {hasTopBottom ? <Check size={18} color={C.sage} /> : <Shirt size={18} color={C.copper} />}
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontFamily: F.body, fontSize: 13, fontWeight: 500, color: C.charcoal, marginBottom: 2 }}>
-                            {typeInfo?.icon} {occ.label}
+                          <div style={{ fontFamily: F.body, fontSize: 13, fontWeight: 500, color: C.charcoal, marginBottom: 2, display: "flex", alignItems: "center", gap: 4 }}>
+                            {editingOccEmoji && editingOccEmoji.dayIdx === di && editingOccEmoji.occIdx === oi ? (
+                              <input value={occEmojiVal} onChange={e => setOccEmojiVal(e.target.value.slice(-2))}
+                                autoFocus
+                                onClick={e => e.stopPropagation()}
+                                onBlur={() => {
+                                  if (occEmojiVal) { const u = [...occasions]; u[di] = [...u[di]]; u[di][oi] = { ...u[di][oi], icon: occEmojiVal }; setOccasions(u); }
+                                  setEditingOccEmoji(null); setOccEmojiVal("");
+                                }}
+                                onKeyDown={e => {
+                                  if (e.key === "Enter") { if (occEmojiVal) { const u = [...occasions]; u[di] = [...u[di]]; u[di][oi] = { ...u[di][oi], icon: occEmojiVal }; setOccasions(u); } setEditingOccEmoji(null); setOccEmojiVal(""); }
+                                  if (e.key === "Escape") { setEditingOccEmoji(null); setOccEmojiVal(""); }
+                                }}
+                                style={{ width: 30, fontSize: 14, textAlign: "center", padding: "1px 3px", borderRadius: 4,
+                                  border: `1.5px solid ${C.copper}`, background: C.copperGlow, outline: "none" }} />
+                            ) : (
+                              <button onClick={e => { e.stopPropagation(); setEditingOccEmoji({ dayIdx: di, occIdx: oi }); setOccEmojiVal(occ.icon || typeInfo?.icon || "🏷️"); }}
+                                style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", fontSize: 13, borderRadius: 4, transition: "all .15s" }}
+                                onMouseEnter={e => e.currentTarget.style.background = C.copperGlow}
+                                onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                                title="Change emoji">
+                                {occ.icon || typeInfo?.icon}
+                              </button>
+                            )}
+                            {occ.label}
                           </div>
                           {filled.length > 0 ? (
                             <div style={{ fontFamily: F.body, fontSize: 12, color: C.warmGray, lineHeight: 1.5 }}>
-                              {filled.slice(0, 4).map(([slotId, val]) => (
-                                <span key={slotId}>{OUTFIT_SLOTS.find(s => s.id === slotId)?.emoji} {val}  </span>
-                              ))}
+                              {filled.slice(0, 4).map(([slotId, val]) => {
+                                const display = Array.isArray(val) ? val.join(", ") : val;
+                                return <span key={slotId}>{OUTFIT_SLOTS.find(s => s.id === slotId)?.emoji} {display}  </span>;
+                              })}
                               {filled.length > 4 && <span style={{ color: C.softGray }}>+{filled.length - 4} more</span>}
                             </div>
                           ) : (
@@ -2591,22 +2776,34 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, customOccasions, setCustom
                           onBlur={e => e.target.style.borderColor = C.borderMedium} />
                       </div>
 
-                      {/* Emoji picker grid */}
+                      {/* Emoji picker grid + custom input */}
                       {emojiPickerOpen && (
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(8, 1fr)", gap: 4,
-                          maxHeight: 160, overflowY: "auto", padding: 8, marginBottom: 10,
-                          background: C.cream, borderRadius: 12, border: `1px solid ${C.borderLight}` }}>
-                          {OCCASION_EMOJIS.map((em) => (
-                            <button key={em} onClick={() => { setNewTypeEmoji(em); setEmojiPickerOpen(false); }}
-                              style={{ width: 36, height: 36, borderRadius: 8, display: "flex", alignItems: "center",
-                                justifyContent: "center", border: `1px solid ${newTypeEmoji === em ? C.copper : "transparent"}`,
-                                background: newTypeEmoji === em ? C.copperGlow : "transparent",
-                                cursor: "pointer", fontSize: 18, transition: "all .1s" }}
-                              onMouseEnter={e => { if (newTypeEmoji !== em) e.currentTarget.style.background = C.copperSubtle; }}
-                              onMouseLeave={e => { if (newTypeEmoji !== em) e.currentTarget.style.background = "transparent"; }}>
-                              {em}
-                            </button>
-                          ))}
+                        <div style={{ marginBottom: 10 }}>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+                            <input value={newTypeEmoji} onChange={e => { const v = e.target.value; setNewTypeEmoji(v.slice(-2)); }}
+                              placeholder="Type any emoji..."
+                              style={{ flex: 1, fontFamily: F.body, fontSize: 18, padding: "6px 10px", textAlign: "center",
+                                border: `1.5px solid ${C.borderMedium}`, borderRadius: 8, background: C.warmWhite,
+                                outline: "none", color: C.charcoal, width: 60 }}
+                              onFocus={e => e.target.style.borderColor = C.copper}
+                              onBlur={e => e.target.style.borderColor = C.borderMedium} />
+                            <span style={{ fontFamily: F.body, fontSize: 11, color: C.softGray }}>or pick below</span>
+                          </div>
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(8, 1fr)", gap: 4,
+                            maxHeight: 160, overflowY: "auto", padding: 8,
+                            background: C.cream, borderRadius: 12, border: `1px solid ${C.borderLight}` }}>
+                            {OCCASION_EMOJIS.map((em) => (
+                              <button key={em} onClick={() => { setNewTypeEmoji(em); setEmojiPickerOpen(false); }}
+                                style={{ width: 36, height: 36, borderRadius: 8, display: "flex", alignItems: "center",
+                                  justifyContent: "center", border: `1px solid ${newTypeEmoji === em ? C.copper : "transparent"}`,
+                                  background: newTypeEmoji === em ? C.copperGlow : "transparent",
+                                  cursor: "pointer", fontSize: 18, transition: "all .1s" }}
+                                onMouseEnter={e => { if (newTypeEmoji !== em) e.currentTarget.style.background = C.copperSubtle; }}
+                                onMouseLeave={e => { if (newTypeEmoji !== em) e.currentTarget.style.background = "transparent"; }}>
+                                {em}
+                              </button>
+                            ))}
+                          </div>
                         </div>
                       )}
 
@@ -2642,7 +2839,7 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, customOccasions, setCustom
         {/* Bottom bar */}
         <div style={{ padding: "16px 20px 32px", borderTop: `1px solid ${C.borderLight}`,
           background: "rgba(253,248,240,.95)", position: "sticky", bottom: 0 }}>
-          <Btn v="sage" sz="lg" onClick={() => { onSave(occasions, dayNames, true); onExit(); }} style={{ width: "100%" }}>
+          <Btn v="sage" sz="lg" onClick={() => { onSave(occasions, dayNames, true, dayEmojiMap); onExit(); }} style={{ width: "100%" }}>
             <Sparkles size={18} /> Done — sync to packing list
           </Btn>
           <div style={{ fontFamily: F.body, fontSize: 11, color: C.softGray, textAlign: "center", marginTop: 8 }}>
@@ -2684,7 +2881,7 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, customOccasions, setCustom
                 {currentOccasion?.label || "Outfit"}
               </button>
             )}
-            <span>· {Object.values(currentOccasion?.slots || {}).filter(Boolean).length} items</span>
+            <span>· {Object.values(currentOccasion?.slots || {}).reduce((c, v) => c + (Array.isArray(v) ? v.length : v ? 1 : 0), 0)} items</span>
           </div>
         </div>
         <Btn v="sage" sz="sm" onClick={handleDoneOutfit}>
@@ -2706,7 +2903,7 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, customOccasions, setCustom
                     background: active ? C.copperGlow : C.warmWhite,
                     cursor: "pointer", fontFamily: F.body, fontSize: 12, fontWeight: active ? 600 : 400,
                     color: active ? C.copper : C.warmGray }}>
-                  {typeInfo?.icon} {occ.label}
+                  {occ.icon || typeInfo?.icon} {occ.label}
                   {currentDayOccasions.length > 1 && active && (
                     <button onClick={(e) => { e.stopPropagation(); removeOccasion(dayIdx, i); }}
                       style={{ background: "none", border: "none", cursor: "pointer", padding: 0,
@@ -2742,7 +2939,8 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, customOccasions, setCustom
         {/* Slot progress dots */}
         <div style={{ display: "flex", justifyContent: "center", gap: 6, marginBottom: 20 }}>
           {OUTFIT_SLOTS.map((s, i) => {
-            const filled = !!currentOccasion?.slots?.[s.id];
+            const sv = currentOccasion?.slots?.[s.id];
+            const filled = Array.isArray(sv) ? sv.length > 0 : !!sv;
             const active = i === slotIdx;
             return (
               <button key={s.id} onClick={() => setSlotIdx(i)}
@@ -2755,8 +2953,11 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, customOccasions, setCustom
 
         {/* Mini outfit preview — what you've picked so far */}
         {(() => {
-          const pickedSlots = OUTFIT_SLOTS.filter(s => currentOccasion?.slots?.[s.id]).map(s => ({
-            ...s, val: currentOccasion.slots[s.id]
+          const pickedSlots = OUTFIT_SLOTS.filter(s => {
+            const v = currentOccasion?.slots?.[s.id];
+            return Array.isArray(v) ? v.length > 0 : !!v;
+          }).map(s => ({
+            ...s, val: Array.isArray(currentOccasion.slots[s.id]) ? currentOccasion.slots[s.id].join(", ") : currentOccasion.slots[s.id]
           }));
           return pickedSlots.length > 0 && (
             <div style={{ display: "flex", gap: 6, justifyContent: "center", flexWrap: "wrap", marginBottom: 16 }}>
@@ -2777,19 +2978,51 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, customOccasions, setCustom
         })()}
 
         {/* Selected value display */}
-        {selectedValue && (
-          <div style={{ background: C.sageGlow, borderRadius: 14, padding: "12px 18px",
-            display: "flex", alignItems: "center", gap: 12, marginBottom: 16,
-            border: `1px solid rgba(139,168,136,.2)` }}>
-            <Check size={16} color={C.sage} />
-            <span style={{ fontFamily: F.body, fontSize: 14, fontWeight: 500, color: C.charcoal, flex: 1 }}>
-              {selectedValue}
-            </span>
-            <button onClick={() => setSlotValue("")} style={{ background: "none", border: "none", cursor: "pointer",
-              color: C.softGray, padding: 4, display: "flex" }}>
-              <X size={14} />
-            </button>
-          </div>
+        {selectedIsMulti ? (
+          selectedValue.length > 0 && (
+            <div style={{ background: C.sageGlow, borderRadius: 14, padding: "10px 14px", marginBottom: 16,
+              border: `1px solid rgba(139,168,136,.2)` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                <Check size={14} color={C.sage} />
+                <span style={{ fontFamily: F.body, fontSize: 11, fontWeight: 600, color: C.sage }}>
+                  {selectedValue.length} selected
+                </span>
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {selectedValue.map(v => (
+                  <span key={v} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 10px",
+                    borderRadius: 8, background: C.warmWhite, border: `1px solid ${C.borderLight}`,
+                    fontFamily: F.body, fontSize: 12, color: C.charcoal }}>
+                    {v}
+                    <button onClick={() => {
+                      const updated = [...occasions];
+                      updated[dayIdx] = [...updated[dayIdx]];
+                      const arr = (Array.isArray(updated[dayIdx][occIdx].slots[currentSlot.id]) ? [...updated[dayIdx][occIdx].slots[currentSlot.id]] : []).filter(x => x !== v);
+                      updated[dayIdx][occIdx] = { ...updated[dayIdx][occIdx], slots: { ...updated[dayIdx][occIdx].slots, [currentSlot.id]: arr.length ? arr : "" } };
+                      setOccasions(updated);
+                    }} style={{ background: "none", border: "none", cursor: "pointer", color: C.softGray, padding: 0, display: "flex" }}>
+                      <X size={12} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )
+        ) : (
+          selectedValue && (
+            <div style={{ background: C.sageGlow, borderRadius: 14, padding: "12px 18px",
+              display: "flex", alignItems: "center", gap: 12, marginBottom: 16,
+              border: `1px solid rgba(139,168,136,.2)` }}>
+              <Check size={16} color={C.sage} />
+              <span style={{ fontFamily: F.body, fontSize: 14, fontWeight: 500, color: C.charcoal, flex: 1 }}>
+                {selectedValue}
+              </span>
+              <button onClick={() => setSlotValue("")} style={{ background: "none", border: "none", cursor: "pointer",
+                color: C.softGray, padding: 4, display: "flex" }}>
+                <X size={14} />
+              </button>
+            </div>
+          )
         )}
 
         {/* Wardrobe carousel */}
@@ -2828,11 +3061,21 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, customOccasions, setCustom
               fontFamily: F.body, fontSize: 14, color: C.copper, transition: "all .15s" }}
             onMouseEnter={e => e.currentTarget.style.background = C.copperGlow}
             onMouseLeave={e => e.currentTarget.style.background = C.copperSubtle}>
-            <Plus size={16} /> Add new {currentSlot.label.toLowerCase()}
+            <Plus size={16} /> Add {selectedIsMulti ? "another" : "new"} {currentSlot.label.toLowerCase()}
           </button>
         )}
 
-        {currentSlot.optional && !selectedValue && (
+        {selectedIsMulti && selectedValue.length > 0 && (
+          <button onClick={goNext}
+            style={{ width: "100%", marginTop: 10, padding: "12px", borderRadius: 12,
+              border: `1.5px solid ${C.sage}`, background: C.sageGlow, cursor: "pointer",
+              fontFamily: F.body, fontSize: 13, fontWeight: 600, color: C.sage, textAlign: "center",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+            <Check size={14} /> Done with {currentSlot.label.toLowerCase()} ({selectedValue.length})
+          </button>
+        )}
+
+        {currentSlot.optional && (selectedIsMulti ? selectedValue.length === 0 : !selectedValue) && (
           <button onClick={goNext}
             style={{ width: "100%", marginTop: 10, padding: "10px", borderRadius: 10,
               border: "none", background: "transparent", cursor: "pointer",
@@ -2883,9 +3126,34 @@ export default function PackPal() {
   const [wardrobe, setWardrobe] = usePersist("wardrobe", {});
   const [customOccasions, setCustomOccasions] = usePersist("customOccasions", []);
   const [otdItems, setOtdItems] = usePersist("otdItems", DEFAULT_OTD_ITEMS);
+  const [editGlobalOtd, setEditGlobalOtd] = useState(false);
+
+  // Migration: move checkout category items into trip.otdItems and strip them from trip.items
+  useEffect(() => {
+    let changed = false;
+    const migrated = trips.map(t => {
+      const checkoutItems = (t.items || []).filter(i => i.category === "checkout");
+      if (checkoutItems.length === 0 && t.otdItems) return t;
+      changed = true;
+      const existing = t.otdItems || otdItems.map(i => ({ ...i }));
+      const nameSet = new Set(existing.map(i => i.name.toLowerCase()));
+      checkoutItems.forEach(ci => {
+        if (!nameSet.has(ci.name.toLowerCase())) {
+          existing.push({ name: ci.name, emoji: "📌" });
+          nameSet.add(ci.name.toLowerCase());
+        }
+      });
+      return { ...t, items: (t.items || []).filter(i => i.category !== "checkout"), otdItems: existing, otdChecked: t.otdChecked || {} };
+    });
+    if (changed) setTrips(migrated);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [searchQ, setSearchQ] = useState("");
   const [catFilter, setCatFilter] = useState(null);
   const [secFilter, setSecFilter] = useState(null);
+  const [addingSec, setAddingSec] = useState(null); // category id we're adding a section to
+  const [newSecName, setNewSecName] = useState("");
+  const newSecRef = useRef(null);
   const [histTrip, setHistTrip] = useState(null);
   const { celebrate, CelebrationLayer } = useCelebration();
 
@@ -2911,7 +3179,8 @@ export default function PackPal() {
   // ── CRUD ──
   const createTrip = () => {
     const items = genList(nTrip.tripType, nTrip.days);
-    const trip = { id: id(), ...nTrip, items, createdAt: new Date().toISOString(),
+    const tripOtd = genTripOtd(otdItems, nTrip.tripType);
+    const trip = { id: id(), ...nTrip, items, otdItems: tripOtd, otdChecked: {}, createdAt: new Date().toISOString(),
       icon: TRIP_TYPES.find(t => t.id === nTrip.tripType[0])?.icon || "✈️", weatherData };
     setTrips(p => [trip, ...p]);
     setActiveTrip(trip);
@@ -2997,6 +3266,19 @@ export default function PackPal() {
     setTrips(p => p.map(t => t.id === activeTrip.id ? { ...t, items: [...t.items, ni] } : t));
     setActiveTrip(p => ({ ...p, items: [...p.items, ni] }));
   };
+  const addSection = (catId, secName) => {
+    if (!activeTrip || !secName.trim()) return;
+    // Check if section already exists in this category
+    const exists = activeTrip.items.some(i => i.category === catId && i.section.toLowerCase() === secName.trim().toLowerCase());
+    if (exists) return;
+    // Add a placeholder item so the section appears — user will rename/add real items
+    const ni = { id: id(), name: "New item", section: secName.trim(), category: catId, packed: false, essential: false, ff: false, freq: 0, needsRefill: false, needsCharge: false };
+    setTrips(p => p.map(t => t.id === activeTrip.id ? { ...t, items: [...t.items, ni] } : t));
+    setActiveTrip(p => ({ ...p, items: [...p.items, ni] }));
+    setAddingSec(null);
+    setNewSecName("");
+    haptic("success");
+  };
   const removeItem = (tid, iid) => {
     setTrips(p => p.map(t => t.id === tid ? { ...t, items: t.items.filter(i => i.id !== iid) } : t));
     if (activeTrip?.id === tid) setActiveTrip(p => ({ ...p, items: p.items.filter(i => i.id !== iid) }));
@@ -3066,7 +3348,7 @@ export default function PackPal() {
       customOccasions={customOccasions} setCustomOccasions={setCustomOccasions}
       celebrate={celebrate}
       onExit={() => setOutfitMode(false)}
-      onSave={(occasions, dayNames, syncToList) => {
+      onSave={(occasions, dayNames, syncToList, dayEmojis) => {
         if (syncToList) {
           const outfitItems = collectUniqueOutfitItems(occasions);
           const outfitNames = new Set(outfitItems.map(i => i.name.toLowerCase()));
@@ -3080,7 +3362,7 @@ export default function PackPal() {
               .filter(item => !existingNames.has(item.name.toLowerCase()))
               .map(item => ({ id: id(), name: item.name, category: "outfits", section: item.section,
                 packed: false, essential: false, ff: false, freq: 0, needsRefill: false, needsCharge: false }));
-            return { ...t, outfitPlan: occasions, outfitDayNames: dayNames, items: [...nonOutfit, ...kept, ...brandNew] };
+            return { ...t, outfitPlan: occasions, outfitDayNames: dayNames, dayEmojis: dayEmojis || {}, items: [...nonOutfit, ...kept, ...brandNew] };
           }));
           setActiveTrip(p => {
             const nonOutfit = p.items.filter(i => i.category !== "outfits");
@@ -3091,19 +3373,26 @@ export default function PackPal() {
               .filter(item => !existingNames.has(item.name.toLowerCase()))
               .map(item => ({ id: id(), name: item.name, category: "outfits", section: item.section,
                 packed: false, essential: false, ff: false, freq: 0, needsRefill: false, needsCharge: false }));
-            return { ...p, outfitPlan: occasions, outfitDayNames: dayNames, items: [...nonOutfit, ...kept, ...brandNew] };
+            return { ...p, outfitPlan: occasions, outfitDayNames: dayNames, dayEmojis: dayEmojis || {}, items: [...nonOutfit, ...kept, ...brandNew] };
           });
         } else {
-          setTrips(p => p.map(t => t.id === activeTrip.id ? { ...t, outfitPlan: occasions, outfitDayNames: dayNames } : t));
-          setActiveTrip(p => ({ ...p, outfitPlan: occasions, outfitDayNames: dayNames }));
+          setTrips(p => p.map(t => t.id === activeTrip.id ? { ...t, outfitPlan: occasions, outfitDayNames: dayNames, dayEmojis: dayEmojis || {} } : t));
+          setActiveTrip(p => ({ ...p, outfitPlan: occasions, outfitDayNames: dayNames, dayEmojis: dayEmojis || {} }));
         }
       }} /><CelebrationLayer /></>;
   }
 
   // ═══ OUT THE DOOR ═══
   if (outTheDoor && activeTrip) {
+    // Migrate: if trip has no otdItems yet, seed from global defaults
+    const tripOtdList = activeTrip.otdItems || genTripOtd(otdItems, activeTrip.tripType || []);
     const tripOtdChecked = activeTrip.otdChecked || {};
-    return <><OutTheDoor trip={activeTrip} otdItems={otdItems} setOtdItems={setOtdItems}
+    return <><OutTheDoor trip={activeTrip} otdItems={tripOtdList}
+      setOtdItems={(updater) => {
+        const update = typeof updater === "function" ? updater : () => updater;
+        setTrips(p => p.map(t => t.id === activeTrip.id ? { ...t, otdItems: update(t.otdItems || tripOtdList) } : t));
+        setActiveTrip(p => ({ ...p, otdItems: update(p.otdItems || tripOtdList) }));
+      }}
       otdChecked={tripOtdChecked}
       celebrate={celebrate}
       setOtdChecked={(updater) => {
@@ -3571,17 +3860,19 @@ export default function PackPal() {
           {catFilter && (() => {
             const catItems = activeTrip.items.filter(i => i.category === catFilter);
             const sections = [...new Set(catItems.map(i => i.section))];
-            if (sections.length <= 1) return null;
             const activeCat = CATEGORIES.find(c => c.id === catFilter);
+            const acColor = activeCat?.color || C.copper;
             return (
-              <div style={{ display: "flex", gap: 6, marginTop: 8, overflowX: "auto", paddingBottom: 4, flexWrap: "wrap" }}>
-                <button onClick={() => setSecFilter(null)} style={{ padding: "5px 12px", borderRadius: 8, whiteSpace: "nowrap",
-                  border: `1px solid ${!secFilter ? (activeCat?.color || C.copper) : C.borderLight}`,
-                  background: !secFilter ? `${activeCat?.color || C.copper}15` : "transparent",
-                  fontFamily: F.body, fontSize: 11, fontWeight: 500,
-                  color: !secFilter ? (activeCat?.color || C.copper) : C.softGray, cursor: "pointer" }}>
-                  All {activeCat?.label || ""}
-                </button>
+              <div style={{ display: "flex", gap: 6, marginTop: 8, overflowX: "auto", paddingBottom: 4, flexWrap: "wrap", alignItems: "center" }}>
+                {sections.length > 1 && (
+                  <button onClick={() => setSecFilter(null)} style={{ padding: "5px 12px", borderRadius: 8, whiteSpace: "nowrap",
+                    border: `1px solid ${!secFilter ? acColor : C.borderLight}`,
+                    background: !secFilter ? `${acColor}15` : "transparent",
+                    fontFamily: F.body, fontSize: 11, fontWeight: 500,
+                    color: !secFilter ? acColor : C.softGray, cursor: "pointer" }}>
+                    All {activeCat?.label || ""}
+                  </button>
+                )}
                 {sections.map(sec => {
                   const si = catItems.filter(i => i.section === sec);
                   const sp = si.filter(i => i.packed).length;
@@ -3589,15 +3880,42 @@ export default function PackPal() {
                   return (
                     <button key={sec} onClick={() => setSecFilter(active ? null : sec)}
                       style={{ padding: "5px 12px", borderRadius: 8, whiteSpace: "nowrap",
-                        border: `1px solid ${active ? (activeCat?.color || C.copper) : C.borderLight}`,
-                        background: active ? `${activeCat?.color || C.copper}15` : "transparent",
+                        border: `1px solid ${active ? acColor : C.borderLight}`,
+                        background: active ? `${acColor}15` : "transparent",
                         fontFamily: F.body, fontSize: 11, fontWeight: 500,
-                        color: active ? (activeCat?.color || C.copper) : C.softGray,
+                        color: active ? acColor : C.softGray,
                         cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
                       {sec} <span style={{ opacity: .5 }}>{sp}/{si.length}</span>
                     </button>
                   );
                 })}
+                {addingSec === catFilter ? (
+                  <form onSubmit={e => { e.preventDefault(); addSection(catFilter, newSecName); }}
+                    style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <input ref={newSecRef} value={newSecName} onChange={e => setNewSecName(e.target.value)}
+                      placeholder="Section name..."
+                      autoFocus
+                      onBlur={() => { if (!newSecName.trim()) { setAddingSec(null); setNewSecName(""); } }}
+                      onKeyDown={e => { if (e.key === "Escape") { setAddingSec(null); setNewSecName(""); } }}
+                      style={{ fontFamily: F.body, fontSize: 11, padding: "5px 10px", borderRadius: 8,
+                        border: `1.5px solid ${acColor}`, background: C.warmWhite, outline: "none",
+                        color: C.charcoal, width: 120 }} />
+                    <button type="submit" style={{ padding: "4px 10px", borderRadius: 8, border: "none",
+                      background: acColor, color: "#fff", fontFamily: F.body, fontSize: 11,
+                      fontWeight: 600, cursor: "pointer" }}>Add</button>
+                  </form>
+                ) : (
+                  <button onClick={() => { setAddingSec(catFilter); setNewSecName(""); }}
+                    style={{ padding: "5px 10px", borderRadius: 8, whiteSpace: "nowrap",
+                      border: `1px dashed ${C.borderMedium}`,
+                      background: "transparent", fontFamily: F.body, fontSize: 11, fontWeight: 500,
+                      color: C.softGray, cursor: "pointer", display: "flex", alignItems: "center", gap: 3,
+                      transition: "all .15s" }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = acColor; e.currentTarget.style.color = acColor; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = C.borderMedium; e.currentTarget.style.color = C.softGray; }}>
+                    <Plus size={12} /> Section
+                  </button>
+                )}
               </div>
             );
           })()}
@@ -3631,6 +3949,31 @@ export default function PackPal() {
                       onToggleCharge={iid => toggleCharge(activeTrip.id, iid)}
                       onToggleCharged={iid => toggleCharged(activeTrip.id, iid)} />
                   ))}
+                  {!refillMode && !chargeMode && (
+                    addingSec === cat.id && !catFilter ? (
+                      <form onSubmit={e => { e.preventDefault(); addSection(cat.id, newSecName); }}
+                        style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px" }}>
+                        <input autoFocus value={newSecName} onChange={e => setNewSecName(e.target.value)}
+                          placeholder="New section name..."
+                          onBlur={() => { if (!newSecName.trim()) { setAddingSec(null); setNewSecName(""); } }}
+                          onKeyDown={e => { if (e.key === "Escape") { setAddingSec(null); setNewSecName(""); } }}
+                          style={{ flex: 1, fontFamily: F.body, fontSize: 13, padding: "8px 12px",
+                            border: `1.5px solid ${cat.color || C.copper}`, borderRadius: 10, background: C.warmWhite,
+                            outline: "none", color: C.charcoal }} />
+                        <Btn v="primary" sz="sm" onClick={() => addSection(cat.id, newSecName)}>Add</Btn>
+                      </form>
+                    ) : !catFilter && (
+                      <button onClick={() => { setAddingSec(cat.id); setNewSecName(""); }}
+                        style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px",
+                          background: "none", border: "none", cursor: "pointer", fontFamily: F.body, fontSize: 12,
+                          color: C.softGray, borderRadius: 10, width: "100%", transition: "all .15s",
+                          fontWeight: 500, letterSpacing: ".03em" }}
+                        onMouseEnter={e => { e.currentTarget.style.color = cat.color || C.copper; e.currentTarget.style.background = C.copperSubtle; }}
+                        onMouseLeave={e => { e.currentTarget.style.color = C.softGray; e.currentTarget.style.background = "none"; }}>
+                        <Plus size={13} /> Add section
+                      </button>
+                    )
+                  )}
                 </div>
               </div>
             );
@@ -3698,6 +4041,11 @@ export default function PackPal() {
     );
   }
 
+  // ═══ GLOBAL OTD EDITOR ═══
+  if (editGlobalOtd) {
+    return <GlobalOtdEditor items={otdItems} setItems={setOtdItems} onExit={() => setEditGlobalOtd(false)} />;
+  }
+
   // ═══ HOME ═══
   return (
     <div style={{ minHeight: "100vh", background: C.cream }}>
@@ -3760,6 +4108,7 @@ export default function PackPal() {
             { label: "Trip History", sub: "22 past trips", icon: <Clock size={20} />, act: () => setView("history"), col: C.copper },
             { label: "Insights", sub: "Patterns & tips", icon: <BarChart3 size={20} />, act: () => setView("insights"), col: C.sage },
             { label: "Freak Out Mode", sub: "ADHD support", icon: <Brain size={20} />, act: () => setFreakOut(true), col: C.lavender },
+            { label: "Out the Door", sub: `${otdItems.length} default items`, icon: <DoorOpen size={20} />, act: () => setEditGlobalOtd(true), col: "#C17F59" },
             { label: "Quick Pack", sub: "Weekend getaway", icon: <Timer size={20} />, act: () => {
               setNTrip({ destination: "", tripType: ["city"], days: 3, weather: "warm", startDate: "", tempRange: "warm" });
               setView("new-trip");
