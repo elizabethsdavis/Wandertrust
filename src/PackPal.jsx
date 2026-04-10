@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useMemo } from "react";
-import { Search, Plus, Check, ChevronRight, Plane, Sparkles, ArrowLeft, X, AlertTriangle, Clock, PackageCheck, Zap, RotateCcw, Trash2, Copy, Award, TrendingUp, Brain, BarChart3, Timer, Shield, RefreshCw, Thermometer, Wind, CloudRain, Umbrella, Heart, Eye, Star, Loader, Shirt, Gem, Watch, Footprints, ShoppingBag, Palette, ChevronLeft, Sun, Moon as MoonIcon } from "lucide-react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { Search, Plus, Check, ChevronRight, Plane, Sparkles, ArrowLeft, X, AlertTriangle, Clock, PackageCheck, Zap, RotateCcw, Trash2, Copy, Award, TrendingUp, Brain, BarChart3, Timer, Shield, RefreshCw, Thermometer, Wind, CloudRain, Umbrella, Heart, Eye, Star, Loader, Shirt, Gem, Watch, Footprints, ShoppingBag, Palette, ChevronLeft, Sun, Moon as MoonIcon, DoorOpen, GripVertical, Edit3, BatteryCharging, Battery } from "lucide-react";
 
 // ═══════════════════════════════════════════════════════════════
 // PACKPAL v2 — Elizabeth's Personal Packing Intelligence
@@ -25,6 +25,110 @@ const F = {
   body: "'DM Sans','Inter',-apple-system,sans-serif",
 };
 const id = () => Math.random().toString(36).substr(2, 9);
+
+// ── Haptic Feedback ──
+const haptic = (style = "light") => {
+  try {
+    if (navigator.vibrate) {
+      if (style === "light") navigator.vibrate(10);
+      else if (style === "medium") navigator.vibrate(20);
+      else if (style === "success") navigator.vibrate([12, 60, 12]);
+      else if (style === "celebration") navigator.vibrate([15, 40, 15, 40, 25]);
+    }
+  } catch (_) { /* silent */ }
+};
+
+// ── Confetti System ──
+const CONFETTI_COLORS = ["#C17F59", "#D4A574", "#8BA888", "#A8C4A5", "#D4A04A", "#E8B84A", "#9B8EC4", "#B8A8D8", "#4EADC5", "#F2C6DE", "#FFD700"];
+function ConfettiBurst({ intensity = "medium", onDone }) {
+  const canvasRef = useRef(null);
+  const count = intensity === "big" ? 120 : intensity === "medium" ? 60 : 30;
+  useEffect(() => {
+    const cvs = canvasRef.current; if (!cvs) return;
+    const ctx = cvs.getContext("2d");
+    const W = cvs.width = window.innerWidth, H = cvs.height = window.innerHeight;
+    const pieces = Array.from({ length: count }, () => ({
+      x: W * (.3 + Math.random() * .4), y: H * (.3 + Math.random() * .2),
+      vx: (Math.random() - .5) * (intensity === "big" ? 18 : 10),
+      vy: -(Math.random() * (intensity === "big" ? 18 : 12) + 4),
+      w: Math.random() * 10 + 4, h: Math.random() * 6 + 2,
+      color: CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
+      rot: Math.random() * 360, rotV: (Math.random() - .5) * 12,
+      gravity: .25 + Math.random() * .15, drag: .98 + Math.random() * .015,
+      opacity: 1, shape: Math.random() > .5 ? "rect" : "circle",
+    }));
+    let frame = 0, raf;
+    const draw = () => {
+      ctx.clearRect(0, 0, W, H);
+      let alive = 0;
+      pieces.forEach(p => {
+        p.vy += p.gravity; p.vx *= p.drag; p.vy *= p.drag;
+        p.x += p.vx; p.y += p.vy; p.rot += p.rotV;
+        if (frame > 40) p.opacity = Math.max(0, p.opacity - .018);
+        if (p.opacity <= 0 || p.y > H + 20) return;
+        alive++;
+        ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot * Math.PI / 180);
+        ctx.globalAlpha = p.opacity;
+        ctx.fillStyle = p.color;
+        if (p.shape === "rect") ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+        else { ctx.beginPath(); ctx.arc(0, 0, p.w / 3, 0, Math.PI * 2); ctx.fill(); }
+        ctx.restore();
+      });
+      frame++;
+      if (alive > 0 && frame < 200) raf = requestAnimationFrame(draw);
+      else onDone?.();
+    };
+    raf = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return <canvas ref={canvasRef} style={{ position: "fixed", inset: 0, zIndex: 9999, pointerEvents: "none" }} />;
+}
+
+// ── Celebration Toast ──
+const CELEBRATE_MSGS = {
+  section: ["Section done!", "Crushed it!", "That's a wrap!", "Nailed it!", "On a roll!"],
+  category: ["Category complete!", "Whole category — boom!", "You're unstoppable!", "Category conquered!"],
+  allPacked: ["ALL PACKED!", "You legend!", "Trip-ready!", "Everything's in!"],
+  allRefilled: ["All refilled!", "Restocked & ready!", "Refill champion!"],
+  allCharged: ["All charged up!", "Fully juiced!", "Powered & ready!"],
+  otdDone: ["Ready to go!", "Out the door!", "Nothing forgotten!"],
+  outfitDone: ["Outfit complete!", "Styled & sorted!", "Looking good!"],
+};
+function CelebrationToast({ msg, emoji }) {
+  return (
+    <div style={{ position: "fixed", top: "15%", left: "50%", transform: "translateX(-50%)", zIndex: 9998,
+      background: "rgba(255,255,255,.95)", backdropFilter: "blur(12px)", borderRadius: 20,
+      padding: "16px 28px", boxShadow: "0 8px 40px rgba(45,41,38,.18)", textAlign: "center",
+      animation: "celebToastIn .4s cubic-bezier(.34,1.56,.64,1)" }}>
+      <div style={{ fontSize: 36, marginBottom: 6 }}>{emoji}</div>
+      <div style={{ fontFamily: F.body, fontSize: 16, fontWeight: 600, color: C.charcoal }}>{msg}</div>
+    </div>
+  );
+}
+
+function useCelebration() {
+  const [show, setShow] = useState(null); // { msg, emoji, intensity }
+  const timerRef = useRef(null);
+  const celebrate = useCallback((type, intensity = "medium") => {
+    const msgs = CELEBRATE_MSGS[type] || CELEBRATE_MSGS.section;
+    const emojis = { section: "🎉", category: "🏆", allPacked: "🎊", allRefilled: "✅", allCharged: "🔋", otdDone: "🚀", outfitDone: "👗" };
+    const msg = msgs[Math.floor(Math.random() * msgs.length)];
+    haptic("celebration");
+    setShow({ msg, emoji: emojis[type] || "🎉", intensity });
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setShow(null), intensity === "big" ? 3500 : 2200);
+  }, []);
+  const CelebrationLayer = useCallback(() => {
+    if (!show) return null;
+    return (
+      <>
+        <ConfettiBurst intensity={show.intensity} onDone={() => { if (show.intensity !== "big") setShow(null); }} />
+        <CelebrationToast msg={show.msg} emoji={show.emoji} />
+      </>
+    );
+  }, [show]);
+  return { celebrate, CelebrationLayer };
+}
 
 // ── Trip Types ──
 const TRIP_TYPES = [
@@ -599,7 +703,7 @@ function genList(types, days) {
       arr.forEach((it) => {
         if (it.cond && !it.cond.some((t) => ts.includes(t)) && it.f < 0.5) return;
         if (it.f >= 0.3 || (days > 5 && it.f >= 0.2)) {
-          items.push({ id: id(), name: it.name, category: catId, section: sec, packed: false, essential: !!it.e, ff: !!it.ff, freq: it.f, needsRefill: false });
+          items.push({ id: id(), name: it.name, category: catId, section: sec, packed: false, essential: !!it.e, ff: !!it.ff, freq: it.f, needsRefill: false, needsCharge: false });
         }
       });
     });
@@ -609,7 +713,7 @@ function genList(types, days) {
       Object.entries(COND_ITEMS[t]).forEach(([sec, arr]) => {
         const cat = t === "ski" || t === "beach" ? "activewear" : "necessities";
         arr.forEach((name) => {
-          items.push({ id: id(), name, category: cat, section: sec, packed: false, essential: false, ff: false, freq: 0.7, needsRefill: false });
+          items.push({ id: id(), name, category: cat, section: sec, packed: false, essential: false, ff: false, freq: 0.7, needsRefill: false, needsCharge: false });
         });
       });
     }
@@ -654,6 +758,7 @@ function Btn({ children, v = "primary", sz = "md", onClick, style, disabled, ...
     danger: { background: C.dangerGlow, color: C.danger, border: `1.5px solid rgba(199,91,91,.2)` },
     lavender: { background: `linear-gradient(135deg,${C.lavender},#B8A8D8)`, color: "#fff", boxShadow: `0 2px 12px rgba(155,142,196,.3)` },
     teal: { background: `linear-gradient(135deg,${C.teal},#6BC4D8)`, color: "#fff", boxShadow: `0 2px 12px rgba(78,173,197,.3)` },
+    amber: { background: `linear-gradient(135deg,${C.amber},#E8B84A)`, color: "#fff", boxShadow: `0 2px 12px rgba(212,160,74,.3)` },
   };
   const pad = sz === "sm" ? "8px 16px" : sz === "lg" ? "16px 32px" : "12px 24px";
   const fs = sz === "sm" ? 13 : sz === "lg" ? 16 : 14;
@@ -670,47 +775,105 @@ function Btn({ children, v = "primary", sz = "md", onClick, style, disabled, ...
   );
 }
 
-function PackItem({ item, onToggle, onRemove, readOnly, refillMode, onToggleRefill }) {
+function PackItem({ item, onToggle, onRemove, readOnly, refillMode, onToggleRefill, onToggleRefilled, chargeMode, onToggleCharge, onToggleCharged }) {
   const [hov, setHov] = useState(false);
+  const markMode = refillMode || chargeMode;
   return (
     <div onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
-      onClick={() => { if (refillMode) { onToggleRefill?.(item.id); } else if (!readOnly) { onToggle(item.id); } }}
-      style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", marginBottom: 2,
-        borderRadius: 12, cursor: readOnly && !refillMode ? "default" : "pointer",
-        background: hov ? C.copperSubtle : "transparent", transition: "all .15s", minHeight: 44 }}>
+      style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", marginBottom: 2,
+        borderRadius: 12, background: hov ? C.copperSubtle : "transparent", transition: "all .15s", minHeight: 44 }}>
+      {/* Main checkbox: refill-mark mode, charge-mark mode, OR pack mode */}
       {refillMode ? (
-        <div style={{ width: 24, height: 24, borderRadius: 8, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
-          border: item.needsRefill ? "none" : `2px solid ${C.borderMedium}`,
-          background: item.needsRefill ? `linear-gradient(135deg,${C.amber},#E8B84A)` : "transparent",
-          transition: "all .2s", boxShadow: item.needsRefill ? `0 2px 8px rgba(212,160,74,.3)` : "none" }}>
+        <div onClick={() => onToggleRefill?.(item.id)}
+          style={{ width: 24, height: 24, borderRadius: 8, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+            border: item.needsRefill ? "none" : `2px solid ${C.borderMedium}`,
+            background: item.needsRefill ? `linear-gradient(135deg,${C.amber},#E8B84A)` : "transparent",
+            transition: "all .2s", boxShadow: item.needsRefill ? `0 2px 8px rgba(212,160,74,.3)` : "none",
+            cursor: "pointer" }}>
           {item.needsRefill && <RefreshCw size={13} color="#fff" strokeWidth={3} />}
         </div>
+      ) : chargeMode ? (
+        <div onClick={() => onToggleCharge?.(item.id)}
+          style={{ width: 24, height: 24, borderRadius: 8, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+            border: item.needsCharge ? "none" : `2px solid ${C.borderMedium}`,
+            background: item.needsCharge ? `linear-gradient(135deg,${C.teal},#6BC4D8)` : "transparent",
+            transition: "all .2s", boxShadow: item.needsCharge ? `0 2px 8px rgba(78,173,197,.3)` : "none",
+            cursor: "pointer" }}>
+          {item.needsCharge && <BatteryCharging size={13} color="#fff" strokeWidth={3} />}
+        </div>
       ) : (
-        <div style={{ width: 24, height: 24, borderRadius: 8, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
-          border: item.packed ? "none" : `2px solid ${C.borderMedium}`,
-          background: item.packed ? `linear-gradient(135deg,${C.sage},${C.sageLight})` : "transparent",
-          transition: "all .2s", boxShadow: item.packed ? `0 2px 8px rgba(139,168,136,.3)` : "none" }}>
+        <div onClick={() => { if (!readOnly) onToggle(item.id); }}
+          style={{ width: 24, height: 24, borderRadius: 8, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+            border: item.packed ? "none" : `2px solid ${C.borderMedium}`,
+            background: item.packed ? `linear-gradient(135deg,${C.sage},${C.sageLight})` : "transparent",
+            transition: "all .2s", boxShadow: item.packed ? `0 2px 8px rgba(139,168,136,.3)` : "none",
+            cursor: readOnly ? "default" : "pointer" }}>
           {item.packed && <Check size={14} color="#fff" strokeWidth={3} />}
         </div>
       )}
+
       <span style={{ flex: 1, fontFamily: F.body, fontSize: 14.5, color: C.charcoal,
-        textDecoration: !refillMode && item.packed ? "line-through" : "none",
-        opacity: !refillMode && item.packed ? .5 : 1, transition: "all .2s" }}>
+        textDecoration: !markMode && item.packed ? "line-through" : "none",
+        opacity: !markMode && item.packed ? .5 : 1, transition: "all .2s",
+        cursor: markMode ? "pointer" : readOnly ? "default" : "pointer" }}
+        onClick={() => { if (refillMode) onToggleRefill?.(item.id); else if (chargeMode) onToggleCharge?.(item.id); else if (!readOnly) onToggle(item.id); }}>
         {item.name}
       </span>
-      {!refillMode && item.ff && !item.packed && (
+
+      {/* Badges */}
+      {!markMode && item.ff && !item.packed && (
         <span style={{ fontSize: 10, fontFamily: F.body, fontWeight: 600, color: C.amber, background: C.amberGlow,
-          padding: "2px 8px", borderRadius: 6, letterSpacing: ".03em", textTransform: "uppercase" }}>Don't forget!</span>
+          padding: "2px 8px", borderRadius: 6, letterSpacing: ".03em", textTransform: "uppercase", flexShrink: 0 }}>Don't forget!</span>
       )}
-      {!refillMode && item.essential && !item.packed && !item.ff && (
+      {!markMode && item.essential && !item.packed && !item.ff && (
         <span style={{ fontSize: 10, fontFamily: F.body, fontWeight: 600, color: C.copper, background: C.copperGlow,
-          padding: "2px 8px", borderRadius: 6, letterSpacing: ".03em", textTransform: "uppercase" }}>Essential</span>
+          padding: "2px 8px", borderRadius: 6, letterSpacing: ".03em", textTransform: "uppercase", flexShrink: 0 }}>Essential</span>
       )}
+
+      {/* Inline refill indicator */}
+      {!markMode && item.needsRefill && (
+        <button onClick={(e) => { e.stopPropagation(); onToggleRefilled?.(item.id); }}
+          title={item.refilled ? "Refilled!" : "Tap to mark as refilled"}
+          style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 10px", borderRadius: 8, flexShrink: 0,
+            border: `1px solid ${item.refilled ? "rgba(139,168,136,.3)" : "rgba(212,160,74,.3)"}`,
+            background: item.refilled ? C.sageGlow : C.amberGlow,
+            cursor: "pointer", transition: "all .15s" }}>
+          {item.refilled ? <Check size={11} color={C.sage} strokeWidth={3} /> : <RefreshCw size={11} color={C.amber} />}
+          <span style={{ fontSize: 10, fontFamily: F.body, fontWeight: 600,
+            color: item.refilled ? C.sage : C.amber,
+            textTransform: "uppercase", letterSpacing: ".03em" }}>
+            {item.refilled ? "Refilled" : "Refill"}
+          </span>
+        </button>
+      )}
+
+      {/* Inline charge indicator */}
+      {!markMode && item.needsCharge && (
+        <button onClick={(e) => { e.stopPropagation(); onToggleCharged?.(item.id); }}
+          title={item.charged ? "Charged!" : "Tap to mark as charged"}
+          style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 10px", borderRadius: 8, flexShrink: 0,
+            border: `1px solid ${item.charged ? "rgba(139,168,136,.3)" : "rgba(78,173,197,.3)"}`,
+            background: item.charged ? C.sageGlow : C.tealGlow,
+            cursor: "pointer", transition: "all .15s" }}>
+          {item.charged ? <Check size={11} color={C.sage} strokeWidth={3} /> : <BatteryCharging size={11} color={C.teal} />}
+          <span style={{ fontSize: 10, fontFamily: F.body, fontWeight: 600,
+            color: item.charged ? C.sage : C.teal,
+            textTransform: "uppercase", letterSpacing: ".03em" }}>
+            {item.charged ? "Charged" : "Charge"}
+          </span>
+        </button>
+      )}
+
       {refillMode && item.needsRefill && (
         <span style={{ fontSize: 10, fontFamily: F.body, fontWeight: 600, color: C.amber, background: C.amberGlow,
-          padding: "2px 8px", borderRadius: 6, letterSpacing: ".03em", textTransform: "uppercase" }}>Needs refill</span>
+          padding: "2px 8px", borderRadius: 6, letterSpacing: ".03em", textTransform: "uppercase", flexShrink: 0 }}>Needs refill</span>
       )}
-      {hov && !readOnly && !refillMode && onRemove && (
+      {chargeMode && item.needsCharge && (
+        <span style={{ fontSize: 10, fontFamily: F.body, fontWeight: 600, color: C.teal, background: C.tealGlow,
+          padding: "2px 8px", borderRadius: 6, letterSpacing: ".03em", textTransform: "uppercase", flexShrink: 0 }}>Needs charge</span>
+      )}
+
+      {hov && !readOnly && !markMode && onRemove && (
         <button onClick={(e) => { e.stopPropagation(); onRemove(item.id); }}
           style={{ background: "none", border: "none", cursor: "pointer", padding: 4, borderRadius: 6,
             display: "flex", color: C.softGray }}><X size={14} /></button>
@@ -719,14 +882,16 @@ function PackItem({ item, onToggle, onRemove, readOnly, refillMode, onToggleRefi
   );
 }
 
-function PackSection({ title, items, onToggle, onRemove, onAddItem, readOnly, refillMode, onToggleRefill }) {
+function PackSection({ title, items, onToggle, onRemove, onAddItem, readOnly, refillMode, onToggleRefill, onToggleRefilled, chargeMode, onToggleCharge, onToggleCharged }) {
   const [open, setOpen] = useState(true);
   const [adding, setAdding] = useState(false);
   const [nv, setNv] = useState("");
   const ref = useRef(null);
   const pk = items.filter(i => i.packed).length, tot = items.length, done = tot > 0 && pk === tot;
   useEffect(() => { if (adding && ref.current) ref.current.focus(); }, [adding]);
+  const markMode = refillMode || chargeMode;
   const refillCount = refillMode ? items.filter(i => i.needsRefill).length : 0;
+  const chargeCount = chargeMode ? items.filter(i => i.needsCharge).length : 0;
 
   return (
     <div style={{ marginBottom: 8 }}>
@@ -744,6 +909,11 @@ function PackSection({ title, items, onToggle, onRemove, onAddItem, readOnly, re
             background: refillCount > 0 ? C.amberGlow : C.copperSubtle, padding: "2px 10px", borderRadius: 8 }}>
             {refillCount} refill{refillCount !== 1 ? "s" : ""}
           </span>
+        ) : chargeMode ? (
+          <span style={{ fontFamily: F.body, fontSize: 12, fontWeight: 500, color: chargeCount > 0 ? C.teal : C.softGray,
+            background: chargeCount > 0 ? C.tealGlow : C.copperSubtle, padding: "2px 10px", borderRadius: 8 }}>
+            {chargeCount} charge{chargeCount !== 1 ? "s" : ""}
+          </span>
         ) : (
           <span style={{ fontFamily: F.body, fontSize: 12, fontWeight: 500, color: done ? C.sage : C.softGray,
             background: done ? C.sageGlow : C.copperSubtle, padding: "2px 10px", borderRadius: 8 }}>{pk}/{tot}</span>
@@ -752,8 +922,9 @@ function PackSection({ title, items, onToggle, onRemove, onAddItem, readOnly, re
       {open && (
         <div style={{ paddingLeft: 12 }}>
           {items.map(i => <PackItem key={i.id} item={i} onToggle={onToggle} onRemove={onRemove} readOnly={readOnly}
-            refillMode={refillMode} onToggleRefill={onToggleRefill} />)}
-          {!readOnly && !refillMode && (adding ? (
+            refillMode={refillMode} onToggleRefill={onToggleRefill} onToggleRefilled={onToggleRefilled}
+            chargeMode={chargeMode} onToggleCharge={onToggleCharge} onToggleCharged={onToggleCharged} />)}
+          {!readOnly && !markMode && (adding ? (
             <form onSubmit={e => { e.preventDefault(); if (nv.trim()) { onAddItem(nv.trim()); setNv(""); setAdding(false); } }}
               style={{ display: "flex", gap: 8, padding: "6px 14px" }}>
               <input ref={ref} value={nv} onChange={e => setNv(e.target.value)} placeholder="Add item..."
@@ -958,7 +1129,7 @@ function FreakOutMode({ onExit, onStartPacking }) {
 }
 
 // ── Guided Pack Mode ──
-function GuidedPack({ items, onToggle, onExit, tripName }) {
+function GuidedPack({ items, onToggle, onToggleRefilled, onToggleCharged, onRemove, onExit, tripName }) {
   const unpacked = items.filter(i => !i.packed);
   const [idx, setIdx] = useState(0);
   const flat = useMemo(() => {
@@ -968,6 +1139,17 @@ function GuidedPack({ items, onToggle, onExit, tripName }) {
   }, [unpacked]);
   const cur = flat[idx];
   const pk = items.filter(i => i.packed).length, pct = Math.round(pk / items.length * 100);
+
+  // How many items remain in this section from current index forward
+  const sectionRemaining = cur ? flat.slice(idx).filter(i => i.section === cur.section).length : 0;
+
+  const skipSection = () => {
+    if (!cur) return;
+    const sec = cur.section;
+    let next = idx;
+    while (next < flat.length && flat[next].section === sec) next++;
+    setIdx(Math.min(next, flat.length - 1));
+  };
 
   if (!cur) {
     return (
@@ -1008,14 +1190,600 @@ function GuidedPack({ items, onToggle, onExit, tripName }) {
             <span style={{ fontFamily: F.body, fontSize: 12, fontWeight: 600, color: C.amber }}>Frequently forgotten!</span>
           </div>
         )}
+        {cur.needsRefill && (
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8,
+            background: cur.refilled ? C.sageGlow : C.amberGlow,
+            padding: "6px 14px", borderRadius: 10, border: `1px solid ${cur.refilled ? "rgba(139,168,136,.2)" : "rgba(212,160,74,.2)"}` }}>
+            {cur.refilled ? <Check size={14} color={C.sage} /> : <RefreshCw size={14} color={C.amber} />}
+            <span style={{ fontFamily: F.body, fontSize: 12, fontWeight: 600,
+              color: cur.refilled ? C.sage : C.amber }}>
+              {cur.refilled ? "Refilled!" : "Needs refill"}
+            </span>
+          </div>
+        )}
+        {cur.needsCharge && (
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8,
+            background: cur.charged ? C.sageGlow : C.tealGlow,
+            padding: "6px 14px", borderRadius: 10, border: `1px solid ${cur.charged ? "rgba(139,168,136,.2)" : "rgba(78,173,197,.2)"}` }}>
+            {cur.charged ? <Check size={14} color={C.sage} /> : <BatteryCharging size={14} color={C.teal} />}
+            <span style={{ fontFamily: F.body, fontSize: 12, fontWeight: 600,
+              color: cur.charged ? C.sage : C.teal }}>
+              {cur.charged ? "Charged!" : "Needs charge"}
+            </span>
+          </div>
+        )}
       </div>
-      <div style={{ display: "flex", gap: 16, marginTop: 48 }}>
+      <div style={{ display: "flex", gap: 16, marginTop: 48, flexWrap: "wrap", justifyContent: "center" }}>
         <Btn v="sage" sz="lg" onClick={() => { onToggle(cur.id); setTimeout(() => setIdx(i => Math.min(i, flat.length - 2)), 50); }}
           style={{ minWidth: 160 }}><Check size={20} /> Packed it</Btn>
+        {cur.needsRefill && !cur.refilled && (
+          <Btn v="amber" sz="lg" onClick={() => onToggleRefilled(cur.id)}
+            style={{ minWidth: 140 }}>
+            <RefreshCw size={18} /> Refilled
+          </Btn>
+        )}
+        {cur.needsCharge && !cur.charged && (
+          <Btn v="teal" sz="lg" onClick={() => onToggleCharged(cur.id)}
+            style={{ minWidth: 140 }}>
+            <BatteryCharging size={18} /> Charged
+          </Btn>
+        )}
         <Btn v="secondary" sz="lg" onClick={() => setIdx(i => Math.min(i + 1, flat.length - 1))} style={{ minWidth: 120 }}>Skip</Btn>
       </div>
-      <div style={{ marginTop: 32, fontFamily: F.body, fontSize: 13, color: C.softGray }}>
+
+      {/* Secondary actions */}
+      <div style={{ display: "flex", gap: 20, marginTop: 16, flexWrap: "wrap", justifyContent: "center" }}>
+        <button onClick={() => { onRemove(cur.id); setTimeout(() => setIdx(i => Math.min(i, flat.length - 2)), 50); }}
+          style={{ background: "none", border: "none", cursor: "pointer",
+            fontFamily: F.body, fontSize: 13, color: C.softGray, textDecoration: "underline",
+            padding: "4px 8px" }}>
+          Don't need for trip
+        </button>
+        {sectionRemaining > 1 && (
+          <button onClick={skipSection}
+            style={{ background: "none", border: "none", cursor: "pointer",
+              fontFamily: F.body, fontSize: 13, color: C.softGray, textDecoration: "underline",
+              padding: "4px 8px" }}>
+            Skip {cur.section} ({sectionRemaining} items)
+          </button>
+        )}
+      </div>
+
+      <div style={{ marginTop: 24, fontFamily: F.body, fontSize: 13, color: C.softGray }}>
         {idx + 1} of {flat.length} remaining
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+// FOCUS REFILL
+// ═══════════════════════════════════════════════════════
+function FocusRefill({ items, onToggleRefill, onToggleRefilled, onExit, tripName }) {
+  const needRefill = useMemo(() => items.filter(i => i.needsRefill), [items]);
+  const notRefilled = useMemo(() => needRefill.filter(i => !i.refilled), [needRefill]);
+  const [idx, setIdx] = useState(0);
+  const [showAll, setShowAll] = useState(false);
+
+  const cur = notRefilled[idx];
+  const doneCount = needRefill.filter(i => i.refilled).length;
+  const pct = needRefill.length > 0 ? Math.round((doneCount / needRefill.length) * 100) : 0;
+
+  // ── Completion screen ──
+  if (!cur) {
+    const allDone = needRefill.length > 0 && doneCount === needRefill.length;
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        minHeight: "70vh", padding: 40, textAlign: "center" }}>
+        <div style={{ fontSize: 64, marginBottom: 24 }}>{allDone ? "✅" : "📋"}</div>
+        <h2 style={{ fontFamily: F.display, fontSize: 36, color: C.charcoal, fontWeight: 500, marginBottom: 12 }}>
+          {allDone ? "All refilled!" : needRefill.length === 0 ? "Nothing to refill" : "Review complete"}
+        </h2>
+        <p style={{ fontFamily: F.body, fontSize: 16, color: C.warmGray, marginBottom: 8 }}>
+          {allDone ? `${needRefill.length} item${needRefill.length !== 1 ? "s" : ""} restocked and ready to pack.`
+            : needRefill.length === 0 ? "Mark items as needing refill from your packing list first."
+            : `${doneCount} of ${needRefill.length} refilled. You can come back for the rest.`}
+        </p>
+        {needRefill.length > 0 && !allDone && (
+          <div style={{ fontFamily: F.body, fontSize: 13, color: C.amber, marginBottom: 24 }}>
+            {needRefill.length - doneCount} still need refilling
+          </div>
+        )}
+        <Btn v="sage" sz="lg" onClick={onExit}>Back to trip</Btn>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", background: `linear-gradient(180deg, #FFF8F2 0%, ${C.cream} 100%)`,
+      display: "flex", flexDirection: "column", alignItems: "center", padding: "40px 20px" }}>
+      {/* Exit */}
+      <button onClick={onExit} style={{ position: "absolute", top: 20, left: 20, background: "none",
+        border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
+        fontFamily: F.body, fontSize: 14, color: C.warmGray }}>
+        <ArrowLeft size={18} /> Exit
+      </button>
+
+      {/* Progress ring */}
+      <ProgressRing pct={pct} size={140} sw={8}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontFamily: F.display, fontSize: 32, color: C.charcoal, fontWeight: 500 }}>{pct}%</div>
+          <div style={{ fontFamily: F.body, fontSize: 11, color: C.softGray, textTransform: "uppercase", letterSpacing: ".08em" }}>refilled</div>
+        </div>
+      </ProgressRing>
+
+      {/* Current item card */}
+      <div style={{ marginTop: 48, textAlign: "center", maxWidth: 400 }}>
+        <div style={{ fontFamily: F.body, fontSize: 11, fontWeight: 600, textTransform: "uppercase",
+          letterSpacing: ".1em", color: C.copper, marginBottom: 12 }}>{cur.section}</div>
+        <h2 style={{ fontFamily: F.display, fontSize: 40, color: C.charcoal, fontWeight: 400, marginBottom: 8, lineHeight: 1.2 }}>
+          {cur.name}
+        </h2>
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: C.amberGlow,
+          padding: "6px 14px", borderRadius: 10, marginTop: 8, border: "1px solid rgba(212,160,74,.2)" }}>
+          <RefreshCw size={14} color={C.amber} />
+          <span style={{ fontFamily: F.body, fontSize: 12, fontWeight: 600, color: C.amber }}>Needs refill</span>
+        </div>
+      </div>
+
+      {/* Action buttons */}
+      <div style={{ display: "flex", gap: 16, marginTop: 48, flexWrap: "wrap", justifyContent: "center" }}>
+        <Btn v="amber" sz="lg" onClick={() => { onToggleRefilled(cur.id); setTimeout(() => setIdx(i => Math.min(i, notRefilled.length - 2)), 50); }}
+          style={{ minWidth: 160 }}><RefreshCw size={18} /> Refilled</Btn>
+        <Btn v="secondary" sz="lg" onClick={() => setIdx(i => Math.min(i + 1, notRefilled.length - 1))}
+          style={{ minWidth: 120 }}>Skip</Btn>
+      </div>
+
+      {/* Remove refill tag */}
+      <button onClick={() => { onToggleRefill(cur.id); setTimeout(() => setIdx(i => Math.min(i, notRefilled.length - 2)), 50); }}
+        style={{ marginTop: 16, background: "none", border: "none", cursor: "pointer",
+          fontFamily: F.body, fontSize: 13, color: C.softGray, textDecoration: "underline",
+          padding: "4px 8px" }}>
+        Doesn't need refill
+      </button>
+
+      <div style={{ marginTop: 24, fontFamily: F.body, fontSize: 13, color: C.softGray }}>
+        {idx + 1} of {notRefilled.length} remaining
+      </div>
+
+      {/* Expandable full list */}
+      <div style={{ marginTop: 32, width: "100%", maxWidth: 400 }}>
+        <button onClick={() => setShowAll(!showAll)} style={{ width: "100%", background: "none", border: "none",
+          cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+          fontFamily: F.body, fontSize: 13, fontWeight: 500, color: C.copper, padding: "8px 0" }}>
+          <ChevronRight size={14} style={{ transform: showAll ? "rotate(90deg)" : "none", transition: "transform .2s" }} />
+          View all refills ({doneCount}/{needRefill.length})
+        </button>
+        {showAll && (
+          <div style={{ background: C.warmWhite, borderRadius: 14, padding: "12px 16px", marginTop: 8,
+            border: `1px solid ${C.borderLight}`, maxHeight: 320, overflow: "auto" }}>
+            {needRefill.map(item => (
+              <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 4px",
+                borderBottom: `1px solid ${C.borderLight}` }}>
+                <button onClick={() => onToggleRefilled(item.id)} style={{ width: 28, height: 28, borderRadius: 8,
+                  display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+                  border: item.refilled ? "none" : `2px solid ${C.borderMedium}`,
+                  background: item.refilled ? `linear-gradient(135deg,${C.sage},${C.sageDeep})` : "transparent",
+                  transition: "all .2s", flexShrink: 0 }}>
+                  {item.refilled && <Check size={14} color="#fff" strokeWidth={3} />}
+                </button>
+                <span style={{ fontFamily: F.body, fontSize: 14, color: item.refilled ? C.softGray : C.charcoal,
+                  textDecoration: item.refilled ? "line-through" : "none", opacity: item.refilled ? .6 : 1,
+                  flex: 1 }}>{item.name}</span>
+                <span style={{ fontFamily: F.body, fontSize: 11, color: C.softGray }}>{item.section}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+// FOCUS CHARGE
+// ═══════════════════════════════════════════════════════
+function FocusCharge({ items, onToggleCharge, onToggleCharged, onExit, tripName }) {
+  const needCharge = useMemo(() => items.filter(i => i.needsCharge), [items]);
+  const notCharged = useMemo(() => needCharge.filter(i => !i.charged), [needCharge]);
+  const [idx, setIdx] = useState(0);
+  const [showAll, setShowAll] = useState(false);
+
+  const cur = notCharged[idx];
+  const doneCount = needCharge.filter(i => i.charged).length;
+  const pct = needCharge.length > 0 ? Math.round((doneCount / needCharge.length) * 100) : 0;
+
+  if (!cur) {
+    const allDone = needCharge.length > 0 && doneCount === needCharge.length;
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        minHeight: "70vh", padding: 40, textAlign: "center" }}>
+        <div style={{ fontSize: 64, marginBottom: 24 }}>{allDone ? "🔋" : "🔌"}</div>
+        <h2 style={{ fontFamily: F.display, fontSize: 36, color: C.charcoal, fontWeight: 500, marginBottom: 12 }}>
+          {allDone ? "All charged up!" : needCharge.length === 0 ? "Nothing to charge" : "Review complete"}
+        </h2>
+        <p style={{ fontFamily: F.body, fontSize: 16, color: C.warmGray, marginBottom: 8 }}>
+          {allDone ? `${needCharge.length} device${needCharge.length !== 1 ? "s" : ""} charged and ready.`
+            : needCharge.length === 0 ? "Mark items as needing charge from your packing list first."
+            : `${doneCount} of ${needCharge.length} charged. You can come back for the rest.`}
+        </p>
+        {needCharge.length > 0 && !allDone && (
+          <div style={{ fontFamily: F.body, fontSize: 13, color: C.teal, marginBottom: 24 }}>
+            {needCharge.length - doneCount} still need charging
+          </div>
+        )}
+        <Btn v="sage" sz="lg" onClick={onExit}>Back to trip</Btn>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", background: `linear-gradient(180deg, #F0FAFB 0%, ${C.cream} 100%)`,
+      display: "flex", flexDirection: "column", alignItems: "center", padding: "40px 20px" }}>
+      <button onClick={onExit} style={{ position: "absolute", top: 20, left: 20, background: "none",
+        border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
+        fontFamily: F.body, fontSize: 14, color: C.warmGray }}>
+        <ArrowLeft size={18} /> Exit
+      </button>
+
+      <ProgressRing pct={pct} size={140} sw={8}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontFamily: F.display, fontSize: 32, color: C.charcoal, fontWeight: 500 }}>{pct}%</div>
+          <div style={{ fontFamily: F.body, fontSize: 11, color: C.softGray, textTransform: "uppercase", letterSpacing: ".08em" }}>charged</div>
+        </div>
+      </ProgressRing>
+
+      <div style={{ marginTop: 48, textAlign: "center", maxWidth: 400 }}>
+        <div style={{ fontFamily: F.body, fontSize: 11, fontWeight: 600, textTransform: "uppercase",
+          letterSpacing: ".1em", color: C.copper, marginBottom: 12 }}>{cur.section}</div>
+        <h2 style={{ fontFamily: F.display, fontSize: 40, color: C.charcoal, fontWeight: 400, marginBottom: 8, lineHeight: 1.2 }}>
+          {cur.name}
+        </h2>
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: C.tealGlow,
+          padding: "6px 14px", borderRadius: 10, marginTop: 8, border: "1px solid rgba(78,173,197,.2)" }}>
+          <BatteryCharging size={14} color={C.teal} />
+          <span style={{ fontFamily: F.body, fontSize: 12, fontWeight: 600, color: C.teal }}>Needs charge</span>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 16, marginTop: 48, flexWrap: "wrap", justifyContent: "center" }}>
+        <Btn v="teal" sz="lg" onClick={() => { onToggleCharged(cur.id); setTimeout(() => setIdx(i => Math.min(i, notCharged.length - 2)), 50); }}
+          style={{ minWidth: 160 }}><BatteryCharging size={18} /> Charged</Btn>
+        <Btn v="secondary" sz="lg" onClick={() => setIdx(i => Math.min(i + 1, notCharged.length - 1))}
+          style={{ minWidth: 120 }}>Skip</Btn>
+      </div>
+
+      <button onClick={() => { onToggleCharge(cur.id); setTimeout(() => setIdx(i => Math.min(i, notCharged.length - 2)), 50); }}
+        style={{ marginTop: 16, background: "none", border: "none", cursor: "pointer",
+          fontFamily: F.body, fontSize: 13, color: C.softGray, textDecoration: "underline",
+          padding: "4px 8px" }}>
+        Doesn't need charging
+      </button>
+
+      <div style={{ marginTop: 24, fontFamily: F.body, fontSize: 13, color: C.softGray }}>
+        {idx + 1} of {notCharged.length} remaining
+      </div>
+
+      <div style={{ marginTop: 32, width: "100%", maxWidth: 400 }}>
+        <button onClick={() => setShowAll(!showAll)} style={{ width: "100%", background: "none", border: "none",
+          cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+          fontFamily: F.body, fontSize: 13, fontWeight: 500, color: C.teal, padding: "8px 0" }}>
+          <ChevronRight size={14} style={{ transform: showAll ? "rotate(90deg)" : "none", transition: "transform .2s" }} />
+          View all charges ({doneCount}/{needCharge.length})
+        </button>
+        {showAll && (
+          <div style={{ background: C.warmWhite, borderRadius: 14, padding: "12px 16px", marginTop: 8,
+            border: `1px solid ${C.borderLight}`, maxHeight: 320, overflow: "auto" }}>
+            {needCharge.map(item => (
+              <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 4px",
+                borderBottom: `1px solid ${C.borderLight}` }}>
+                <button onClick={() => onToggleCharged(item.id)} style={{ width: 28, height: 28, borderRadius: 8,
+                  display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+                  border: item.charged ? "none" : `2px solid ${C.borderMedium}`,
+                  background: item.charged ? `linear-gradient(135deg,${C.sage},${C.sageDark})` : "transparent",
+                  transition: "all .2s", flexShrink: 0 }}>
+                  {item.charged && <Check size={14} color="#fff" strokeWidth={3} />}
+                </button>
+                <span style={{ fontFamily: F.body, fontSize: 14, color: item.charged ? C.softGray : C.charcoal,
+                  textDecoration: item.charged ? "line-through" : "none", opacity: item.charged ? .6 : 1,
+                  flex: 1 }}>{item.name}</span>
+                <span style={{ fontFamily: F.body, fontSize: 11, color: C.softGray }}>{item.section}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+// OUT THE DOOR
+// ═══════════════════════════════════════════════════════
+const DEFAULT_OTD_ITEMS = [
+  { name: "Passport / ID", emoji: "🪪" },
+  { name: "Phone + charger", emoji: "📱" },
+  { name: "Wallet + cards", emoji: "💳" },
+  { name: "Keys (house + car)", emoji: "🔑" },
+  { name: "Boarding pass / tickets", emoji: "🎫" },
+  { name: "Suitcase zipped & locked", emoji: "🧳" },
+  { name: "Carry-on bag packed", emoji: "🎒" },
+  { name: "Medications", emoji: "💊" },
+  { name: "Snacks + water bottle", emoji: "🍫" },
+  { name: "Headphones", emoji: "🎧" },
+  { name: "Sunglasses", emoji: "🕶️" },
+  { name: "Lights off, AC off", emoji: "💡" },
+  { name: "Windows + doors locked", emoji: "🚪" },
+  { name: "Thermostat set", emoji: "🌡️" },
+  { name: "Pet care arranged", emoji: "🐾" },
+  { name: "Plants watered", emoji: "🌱" },
+  { name: "Trash taken out", emoji: "🗑️" },
+];
+
+function OutTheDoor({ trip, otdItems, setOtdItems, otdChecked, setOtdChecked, onExit, celebrate }) {
+  const [mode, setMode] = useState("focus"); // "focus" or "edit"
+  const [addingItem, setAddingItem] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newEmoji, setNewEmoji] = useState("");
+  const addRef = useRef(null);
+
+  useEffect(() => { if (addingItem && addRef.current) addRef.current.focus(); }, [addingItem]);
+
+  const checked = otdChecked || {};
+  const toggleCheck = (idx) => {
+    const wasChecked = checked[idx];
+    setOtdChecked(prev => ({ ...prev, [idx]: !prev[idx] }));
+    if (!wasChecked) {
+      haptic("success");
+      // Check if this completes everything
+      const newChecked = { ...checked, [idx]: true };
+      const allDone = otdItems.every((_, i) => newChecked[i]);
+      if (allDone) setTimeout(() => celebrate?.("otdDone", "big"), 200);
+    }
+  };
+  const checkedCount = otdItems.filter((_, i) => checked[i]).length;
+  const pct = otdItems.length > 0 ? Math.round((checkedCount / otdItems.length) * 100) : 0;
+
+  // Focus mode index — skip checked items
+  const unchecked = otdItems.map((item, i) => ({ ...item, idx: i })).filter(it => !checked[it.idx]);
+  const [focusIdx, setFocusIdx] = useState(0);
+  const cur = unchecked[focusIdx];
+
+  const addItem = () => {
+    if (newName.trim()) {
+      setOtdItems(prev => [...prev, { name: newName.trim(), emoji: newEmoji || "📌" }]);
+      setNewName("");
+      setNewEmoji("");
+      setAddingItem(false);
+    }
+  };
+
+  const removeItem = (idx) => {
+    setOtdItems(prev => prev.filter((_, i) => i !== idx));
+    // Shift checked state
+    setOtdChecked(prev => {
+      const next = {};
+      Object.keys(prev).forEach(k => {
+        const ki = parseInt(k);
+        if (ki < idx) next[ki] = prev[ki];
+        else if (ki > idx) next[ki - 1] = prev[ki];
+      });
+      return next;
+    });
+  };
+
+  // ═══ ALL DONE ═══
+  if (checkedCount === otdItems.length && otdItems.length > 0) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        minHeight: "80vh", padding: 40, textAlign: "center",
+        background: `linear-gradient(180deg, #FFF8F2 0%, ${C.cream} 100%)` }}>
+        <div style={{ fontSize: 72, marginBottom: 24 }}>🚀</div>
+        <h2 style={{ fontFamily: F.display, fontSize: 36, color: C.charcoal, fontWeight: 500, marginBottom: 8 }}>
+          You're out the door!
+        </h2>
+        <p style={{ fontFamily: F.body, fontSize: 16, color: C.warmGray, marginBottom: 8 }}>
+          Everything's checked. Have an amazing trip.
+        </p>
+        <p style={{ fontFamily: F.body, fontSize: 14, color: C.softGray, marginBottom: 32 }}>
+          {trip.destination} — here you come!
+        </p>
+        <div style={{ display: "flex", gap: 12 }}>
+          <Btn v="sage" sz="lg" onClick={onExit}>Back to trip</Btn>
+          <Btn v="secondary" sz="lg" onClick={() => setOtdChecked({})}>
+            <RotateCcw size={16} /> Reset
+          </Btn>
+        </div>
+      </div>
+    );
+  }
+
+  // ═══ EDIT MODE ═══
+  if (mode === "edit") {
+    return (
+      <div style={{ minHeight: "100vh", background: `linear-gradient(180deg, #FFF8F2 0%, ${C.cream} 100%)` }}>
+        <div style={{ padding: "16px 20px", display: "flex", alignItems: "center", gap: 12,
+          borderBottom: `1px solid ${C.borderLight}`, background: "rgba(255,248,242,.95)", backdropFilter: "blur(10px)" }}>
+          <button onClick={() => setMode("focus")} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
+            <ArrowLeft size={20} color={C.warmGray} />
+          </button>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: F.body, fontSize: 13, fontWeight: 600, color: C.copper }}>Edit Checklist</div>
+            <div style={{ fontFamily: F.body, fontSize: 11, color: C.softGray }}>{otdItems.length} items</div>
+          </div>
+          <Btn v="sage" sz="sm" onClick={() => setMode("focus")}>
+            <Check size={14} /> Done
+          </Btn>
+        </div>
+
+        <div style={{ padding: "16px 16px 120px" }}>
+          <p style={{ fontFamily: F.body, fontSize: 13, color: C.softGray, marginBottom: 16, padding: "0 4px" }}>
+            Customize your out-the-door checklist. These items persist across all trips.
+          </p>
+
+          {otdItems.map((item, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", marginBottom: 4,
+              borderRadius: 12, background: C.warmWhite, border: `1px solid ${C.borderLight}` }}>
+              <span style={{ fontSize: 20, flexShrink: 0 }}>{item.emoji}</span>
+              <span style={{ flex: 1, fontFamily: F.body, fontSize: 14, color: C.charcoal }}>{item.name}</span>
+              <button onClick={() => removeItem(i)}
+                style={{ background: "none", border: "none", cursor: "pointer", padding: 4, borderRadius: 6,
+                  display: "flex", color: C.softGray, transition: "color .15s" }}
+                onMouseEnter={e => e.currentTarget.style.color = C.danger}
+                onMouseLeave={e => e.currentTarget.style.color = C.softGray}>
+                <X size={16} />
+              </button>
+            </div>
+          ))}
+
+          {/* Add new item */}
+          {addingItem ? (
+            <form onSubmit={(e) => { e.preventDefault(); addItem(); }}
+              style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
+              <button onClick={() => {
+                const emojis = ["📌","🔑","📱","💳","🎒","💊","🎧","🧴","📄","🧥","☂️","🔌","💻","📷","🪥","✈️"];
+                setNewEmoji(emojis[Math.floor(Math.random() * emojis.length)]);
+              }}
+                type="button"
+                style={{ width: 40, height: 40, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center",
+                  border: `1.5px solid ${C.borderMedium}`, background: C.cream, cursor: "pointer", fontSize: 18, flexShrink: 0 }}>
+                {newEmoji || "📌"}
+              </button>
+              <input ref={addRef} value={newName} onChange={e => setNewName(e.target.value)}
+                placeholder="e.g. Laptop charger, Travel pillow..."
+                onBlur={() => { if (!newName.trim()) setTimeout(() => setAddingItem(false), 150); }}
+                style={{ flex: 1, fontFamily: F.body, fontSize: 14, padding: "10px 14px",
+                  border: `1.5px solid ${C.borderMedium}`, borderRadius: 10,
+                  background: C.warmWhite, outline: "none", color: C.charcoal }}
+                onFocus={e => e.target.style.borderColor = C.copper} />
+              <Btn v="primary" sz="sm" onClick={addItem}>Add</Btn>
+            </form>
+          ) : (
+            <button onClick={() => setAddingItem(true)}
+              style={{ width: "100%", padding: "14px 16px", borderRadius: 14, marginTop: 8,
+                border: `2px dashed ${C.borderMedium}`, background: "transparent",
+                cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                fontFamily: F.body, fontSize: 14, color: C.copper, transition: "all .15s" }}
+              onMouseEnter={e => e.currentTarget.style.background = C.copperSubtle}
+              onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+              <Plus size={16} /> Add item
+            </button>
+          )}
+
+          {/* Reset to defaults */}
+          <button onClick={() => { if (confirm("Reset to default checklist? Custom items will be lost.")) { setOtdItems(DEFAULT_OTD_ITEMS); setOtdChecked({}); } }}
+            style={{ width: "100%", padding: "12px", borderRadius: 10, marginTop: 16,
+              border: "none", background: "transparent", cursor: "pointer",
+              fontFamily: F.body, fontSize: 12, color: C.softGray, textAlign: "center" }}>
+            Reset to defaults
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ═══ FOCUS MODE ═══
+  return (
+    <div style={{ minHeight: "100vh", background: `linear-gradient(180deg, #FFF8F2 0%, ${C.cream} 100%)`,
+      display: "flex", flexDirection: "column" }}>
+      {/* Header */}
+      <div style={{ padding: "16px 20px", display: "flex", alignItems: "center", gap: 12,
+        borderBottom: `1px solid ${C.borderLight}`, background: "rgba(255,248,242,.95)", backdropFilter: "blur(10px)" }}>
+        <button onClick={onExit} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
+          <ArrowLeft size={20} color={C.warmGray} />
+        </button>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontFamily: F.body, fontSize: 13, fontWeight: 600, color: C.copper,
+            display: "flex", alignItems: "center", gap: 6 }}>
+            <DoorOpen size={15} /> Out the Door
+          </div>
+          <div style={{ fontFamily: F.body, fontSize: 11, color: C.softGray }}>
+            {checkedCount} of {otdItems.length} checked
+          </div>
+        </div>
+        <button onClick={() => setMode("edit")}
+          style={{ background: C.copperSubtle, border: `1px solid ${C.borderLight}`, borderRadius: 10,
+            padding: "6px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: 5,
+            fontFamily: F.body, fontSize: 12, fontWeight: 500, color: C.copper }}>
+          <Edit3 size={13} /> Edit list
+        </button>
+      </div>
+
+      {/* Focus card */}
+      {cur ? (
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
+          justifyContent: "center", padding: "40px 24px", textAlign: "center" }}>
+          <ProgressRing pct={pct} size={120} sw={7}>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontFamily: F.display, fontSize: 28, color: C.charcoal, fontWeight: 500 }}>{pct}%</div>
+              <div style={{ fontFamily: F.body, fontSize: 10, color: C.softGray, textTransform: "uppercase", letterSpacing: ".08em" }}>ready</div>
+            </div>
+          </ProgressRing>
+
+          <div style={{ marginTop: 40 }}>
+            <div style={{ fontSize: 56, marginBottom: 16 }}>{cur.emoji}</div>
+            <h2 style={{ fontFamily: F.display, fontSize: 36, color: C.charcoal, fontWeight: 400, marginBottom: 8, lineHeight: 1.2 }}>
+              {cur.name}
+            </h2>
+            <div style={{ fontFamily: F.body, fontSize: 13, color: C.softGray }}>
+              {focusIdx + 1} of {unchecked.length} remaining
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 16, marginTop: 40 }}>
+            <Btn v="sage" sz="lg" onClick={() => {
+              toggleCheck(cur.idx);
+              // Don't advance focusIdx — the item leaves unchecked array automatically
+            }} style={{ minWidth: 160 }}>
+              <Check size={20} /> Got it
+            </Btn>
+            <Btn v="secondary" sz="lg" onClick={() => setFocusIdx(i => Math.min(i + 1, unchecked.length - 1))}
+              style={{ minWidth: 100 }}>Skip</Btn>
+          </div>
+        </div>
+      ) : (
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
+          justifyContent: "center", padding: 40, textAlign: "center" }}>
+          <div style={{ fontSize: 64, marginBottom: 24 }}>🚀</div>
+          <h2 style={{ fontFamily: F.display, fontSize: 32, color: C.charcoal, fontWeight: 500 }}>All clear!</h2>
+        </div>
+      )}
+
+      {/* Quick-check list at bottom */}
+      <div style={{ padding: "0 16px 24px" }}>
+        <details>
+          <summary style={{ fontFamily: F.body, fontSize: 12, fontWeight: 600, textTransform: "uppercase",
+            letterSpacing: ".06em", color: C.warmGray, cursor: "pointer", padding: "8px 4px",
+            listStyle: "none", display: "flex", alignItems: "center", gap: 6 }}>
+            <ChevronRight size={14} /> Full checklist
+          </summary>
+          <div style={{ marginTop: 8, background: C.warmWhite, borderRadius: 14, border: `1px solid ${C.borderLight}`,
+            padding: "4px 0", maxHeight: 280, overflowY: "auto" }}>
+            {otdItems.map((item, i) => {
+              const done = !!checked[i];
+              return (
+                <div key={i} onClick={() => toggleCheck(i)}
+                  style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px",
+                    cursor: "pointer", borderRadius: 10, transition: "background .15s" }}
+                  onMouseEnter={e => e.currentTarget.style.background = C.copperSubtle}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                  <div style={{ width: 22, height: 22, borderRadius: 7, flexShrink: 0,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    border: done ? "none" : `2px solid ${C.borderMedium}`,
+                    background: done ? `linear-gradient(135deg,${C.sage},${C.sageLight})` : "transparent",
+                    transition: "all .2s" }}>
+                    {done && <Check size={13} color="#fff" strokeWidth={3} />}
+                  </div>
+                  <span style={{ fontSize: 16 }}>{item.emoji}</span>
+                  <span style={{ flex: 1, fontFamily: F.body, fontSize: 13, color: C.charcoal,
+                    textDecoration: done ? "line-through" : "none", opacity: done ? .5 : 1 }}>
+                    {item.name}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </details>
       </div>
     </div>
   );
@@ -1428,7 +2196,16 @@ function collectUniqueOutfitItems(occasions) {
   return Array.from(uniqueItems.values());
 }
 
-function OutfitBuilder({ trip, wardrobe, setWardrobe, onSave, onExit }) {
+const OCCASION_EMOJIS = [
+  "☀️","🌙","🏃‍♀️","✨","🍽️","🥂","💼","🎭","🛍️","🏖️","🎶","💃","🧘","⛷️","🎪","🏊","🚶‍♀️","🍳",
+  "☕","🎉","🎂","💐","📸","🏛️","⛪","🎓","👰","🧖‍♀️","🏋️","🚴","🧗","🎿","⛵","🎨","🎬",
+  "🍕","🍷","🎤","🪩","🌅","🌃","❄️","🔥","🦋","🌺","🌈","💎","🪷","🫧"
+];
+
+function OutfitBuilder({ trip, wardrobe, setWardrobe, customOccasions, setCustomOccasions, onSave, onExit, celebrate }) {
+  // Merge default + custom occasion types
+  const allOccasionTypes = useMemo(() => [...OCCASION_TYPES, ...customOccasions], [customOccasions]);
+
   // Hub vs editor mode
   const [editing, setEditing] = useState(null); // null = hub, { dayIdx, occIdx } = editing
   const [occasions, setOccasions] = useState(() => {
@@ -1448,13 +2225,23 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, onSave, onExit }) {
   const [newItemVal, setNewItemVal] = useState("");
   const [saveFlash, setSaveFlash] = useState("");
   const [addingOccForDay, setAddingOccForDay] = useState(null); // index of day showing occasion picker
+  const [creatingType, setCreatingType] = useState(false); // show "create new type" form
+  const [newTypeName, setNewTypeName] = useState("");
+  const [newTypeEmoji, setNewTypeEmoji] = useState("");
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const [typeSearchQ, setTypeSearchQ] = useState("");
+  const newTypeRef = useRef(null);
   const [renamingDay, setRenamingDay] = useState(null); // index of day being renamed
+  const [renamingOcc, setRenamingOcc] = useState(false); // whether renaming the current occasion
   const [renameVal, setRenameVal] = useState("");
   const renameRef = useRef(null);
+  const occRenameRef = useRef(null);
   const newRef = useRef(null);
 
   useEffect(() => { if (addingNew && newRef.current) newRef.current.focus(); }, [addingNew]);
   useEffect(() => { if (renamingDay !== null && renameRef.current) { renameRef.current.focus(); renameRef.current.select(); } }, [renamingDay]);
+  useEffect(() => { if (renamingOcc && occRenameRef.current) { occRenameRef.current.focus(); occRenameRef.current.select(); } }, [renamingOcc]);
+  useEffect(() => { if (creatingType && newTypeRef.current) newTypeRef.current.focus(); }, [creatingType]);
 
   const totalDays = trip.days;
   const totalSlots = OUTFIT_SLOTS.length;
@@ -1485,6 +2272,7 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, onSave, onExit }) {
     updated[dayIdx] = [...updated[dayIdx]];
     updated[dayIdx][occIdx] = { ...updated[dayIdx][occIdx], slots: { ...updated[dayIdx][occIdx].slots, [currentSlot.id]: val } };
     setOccasions(updated);
+    if (val) haptic("light");
     if (val && !wardrobe[currentSlot.id]?.includes(val)) {
       setWardrobe(prev => ({ ...prev, [currentSlot.id]: [...(prev[currentSlot.id] || []), val] }));
     }
@@ -1492,6 +2280,32 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, onSave, onExit }) {
     if (val && autoAdvance && slotIdx < totalSlots - 1) {
       setTimeout(() => setSlotIdx(s => s + 1), 350);
     }
+  };
+
+  const pickOccasionType = (di, typeId, label, icon) => {
+    const updated = [...occasions];
+    updated[di] = [...updated[di], { id: id(), type: typeId, label: label, slots: {} }];
+    setOccasions(updated);
+    setEditing({ dayIdx: di, occIdx: updated[di].length - 1 });
+    setSlotIdx(0);
+    setAddingOccForDay(null);
+    setTypeSearchQ("");
+  };
+
+  const createAndPickType = (di) => {
+    if (!newTypeName.trim()) return;
+    const typeId = newTypeName.trim().toLowerCase().replace(/\s+/g, "-");
+    const emoji = newTypeEmoji || "🏷️";
+    const newType = { id: typeId, label: newTypeName.trim(), icon: emoji };
+    // Check for duplicate
+    if (!allOccasionTypes.find(t => t.id === typeId)) {
+      setCustomOccasions(prev => [...prev, newType]);
+    }
+    pickOccasionType(di, typeId, newTypeName.trim(), emoji);
+    setCreatingType(false);
+    setNewTypeName("");
+    setNewTypeEmoji("");
+    setEmojiPickerOpen(false);
   };
 
   const removeOccasion = (di, oi) => {
@@ -1509,17 +2323,39 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, onSave, onExit }) {
     setSaveFlash("Saved!");
     setTimeout(() => setSaveFlash(""), 1500);
     onSave(occasions, dayNames, true);
+    haptic("success");
+    // Check if this outfit had all slots filled
+    if (editing && currentOccasion) {
+      const OUTFIT_SLOTS = [{ id: "top" }, { id: "bottom" }, { id: "shoes" }, { id: "layer" }, { id: "bag" }, { id: "jewelry" }];
+      const filledSlots = OUTFIT_SLOTS.filter(s => currentOccasion.slots?.[s.id]);
+      if (filledSlots.length >= 3) celebrate?.("outfitDone", "medium");
+    }
     setEditing(null);
     setSlotIdx(0);
   };
 
+  const commitRenameRef = useRef(false);
   const commitRename = () => {
+    if (commitRenameRef.current) return; // prevent double-fire from blur + submit
+    commitRenameRef.current = true;
     if (renamingDay !== null && renameVal.trim()) {
-      const updated = [...dayNames];
-      updated[renamingDay] = renameVal.trim();
-      setDayNames(updated);
+      const idx = renamingDay;
+      const val = renameVal.trim();
+      setDayNames(prev => { const u = [...prev]; u[idx] = val; return u; });
     }
     setRenamingDay(null);
+    setRenameVal("");
+    setTimeout(() => { commitRenameRef.current = false; }, 50);
+  };
+
+  const commitOccRename = () => {
+    if (renameVal.trim() && editing) {
+      const updated = [...occasions];
+      updated[dayIdx] = [...updated[dayIdx]];
+      updated[dayIdx][occIdx] = { ...updated[dayIdx][occIdx], label: renameVal.trim() };
+      setOccasions(updated);
+    }
+    setRenamingOcc(false);
     setRenameVal("");
   };
 
@@ -1593,7 +2429,7 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, onSave, onExit }) {
                 {dayOccs.map((occ, oi) => {
                   const filled = Object.entries(occ.slots).filter(([, v]) => v);
                   const hasTopBottom = occ.slots.top && occ.slots.bottom;
-                  const typeInfo = OCCASION_TYPES.find(t => t.id === occ.type);
+                  const typeInfo = allOccasionTypes.find(t => t.id === occ.type);
                   return (
                     <div key={occ.id} style={{ position: "relative" }}>
                       <button onClick={() => { setEditing({ dayIdx: di, occIdx: oi }); setSlotIdx(0); }}
@@ -1674,38 +2510,121 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, onSave, onExit }) {
 
                 {/* Add another occasion to this day */}
                 {addingOccForDay === di ? (
-                  <div style={{ padding: "12px 16px", borderRadius: 14, border: `1.5px solid ${C.borderLight}`,
+                  <div style={{ padding: "14px 16px", borderRadius: 14, border: `1.5px solid ${C.borderLight}`,
                     background: C.warmWhite }}>
-                    <div style={{ fontFamily: F.body, fontSize: 12, fontWeight: 500, color: C.charcoal, marginBottom: 10 }}>
-                      What kind of outfit?
-                    </div>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      {OCCASION_TYPES.map(t => (
-                        <button key={t.id} onClick={() => {
-                          const updated = [...occasions];
-                          updated[di] = [...updated[di], { id: id(), type: t.id, label: t.label, slots: {} }];
-                          setOccasions(updated);
-                          setEditing({ dayIdx: di, occIdx: updated[di].length - 1 });
-                          setSlotIdx(0);
-                          setAddingOccForDay(null);
-                        }}
-                          style={{ padding: "8px 14px", borderRadius: 10, border: `1px solid ${C.borderLight}`,
-                            background: C.cream, cursor: "pointer", fontFamily: F.body, fontSize: 12, color: C.charcoal,
-                            display: "flex", alignItems: "center", gap: 6, transition: "all .15s" }}
-                          onMouseEnter={e => e.currentTarget.style.background = C.copperGlow}
-                          onMouseLeave={e => e.currentTarget.style.background = C.cream}>
-                          {t.icon} {t.label}
+                    {!creatingType ? (<>
+                      <div style={{ fontFamily: F.body, fontSize: 12, fontWeight: 500, color: C.charcoal, marginBottom: 10 }}>
+                        What kind of outfit?
+                      </div>
+
+                      {/* Search (shows when 6+ types) */}
+                      {allOccasionTypes.length >= 6 && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px",
+                          background: C.cream, borderRadius: 10, border: `1px solid ${C.borderLight}`, marginBottom: 10 }}>
+                          <Search size={13} color={C.softGray} />
+                          <input value={typeSearchQ} onChange={e => setTypeSearchQ(e.target.value)}
+                            placeholder="Search types..."
+                            style={{ flex: 1, border: "none", background: "none", outline: "none",
+                              fontFamily: F.body, fontSize: 12, color: C.charcoal }} />
+                          {typeSearchQ && <button onClick={() => setTypeSearchQ("")}
+                            style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "flex" }}>
+                            <X size={12} color={C.softGray} /></button>}
+                        </div>
+                      )}
+
+                      {/* Occasion type grid */}
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", maxHeight: 200, overflowY: "auto",
+                        paddingRight: 4 }}>
+                        {allOccasionTypes
+                          .filter(t => !typeSearchQ || t.label.toLowerCase().includes(typeSearchQ.toLowerCase()))
+                          .map(t => (
+                          <button key={t.id} onClick={() => pickOccasionType(di, t.id, t.label, t.icon)}
+                            style={{ padding: "8px 14px", borderRadius: 10, border: `1px solid ${C.borderLight}`,
+                              background: C.cream, cursor: "pointer", fontFamily: F.body, fontSize: 12, color: C.charcoal,
+                              display: "flex", alignItems: "center", gap: 6, transition: "all .15s" }}
+                            onMouseEnter={e => e.currentTarget.style.background = C.copperGlow}
+                            onMouseLeave={e => e.currentTarget.style.background = C.cream}>
+                            {t.icon} {t.label}
+                          </button>
+                        ))}
+
+                        {/* Create new type button */}
+                        <button onClick={() => setCreatingType(true)}
+                          style={{ padding: "8px 14px", borderRadius: 10, border: `1.5px dashed ${C.borderMedium}`,
+                            background: "transparent", cursor: "pointer", fontFamily: F.body, fontSize: 12,
+                            color: C.copper, display: "flex", alignItems: "center", gap: 6, transition: "all .15s" }}
+                          onMouseEnter={e => e.currentTarget.style.background = C.copperSubtle}
+                          onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                          <Plus size={13} /> New type
                         </button>
-                      ))}
-                    </div>
-                    <button onClick={() => setAddingOccForDay(null)}
-                      style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.body,
-                        fontSize: 12, color: C.softGray, marginTop: 8, padding: "4px 0" }}>
-                      Cancel
-                    </button>
+                      </div>
+
+                      <button onClick={() => { setAddingOccForDay(null); setTypeSearchQ(""); }}
+                        style={{ background: "none", border: "none", cursor: "pointer", fontFamily: F.body,
+                          fontSize: 12, color: C.softGray, marginTop: 10, padding: "4px 0" }}>
+                        Cancel
+                      </button>
+                    </>) : (<>
+                      {/* Create new occasion type form */}
+                      <div style={{ fontFamily: F.body, fontSize: 12, fontWeight: 500, color: C.charcoal, marginBottom: 10 }}>
+                        Create a new outfit type
+                      </div>
+
+                      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                        {/* Emoji selector */}
+                        <button onClick={() => setEmojiPickerOpen(!emojiPickerOpen)}
+                          style={{ width: 44, height: 44, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center",
+                            border: `1.5px solid ${newTypeEmoji ? C.copper : C.borderMedium}`,
+                            background: newTypeEmoji ? C.copperGlow : C.cream, cursor: "pointer",
+                            fontSize: newTypeEmoji ? 22 : 14, color: C.softGray, flexShrink: 0 }}>
+                          {newTypeEmoji || "🏷️"}
+                        </button>
+
+                        {/* Name input */}
+                        <input ref={newTypeRef} value={newTypeName} onChange={e => setNewTypeName(e.target.value)}
+                          placeholder="e.g. Brunch, Pool Party, Hiking..."
+                          onKeyDown={e => { if (e.key === "Enter" && newTypeName.trim()) createAndPickType(di); }}
+                          style={{ flex: 1, fontFamily: F.body, fontSize: 13, padding: "10px 14px",
+                            border: `1.5px solid ${C.borderMedium}`, borderRadius: 10,
+                            background: C.cream, outline: "none", color: C.charcoal }}
+                          onFocus={e => e.target.style.borderColor = C.copper}
+                          onBlur={e => e.target.style.borderColor = C.borderMedium} />
+                      </div>
+
+                      {/* Emoji picker grid */}
+                      {emojiPickerOpen && (
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(8, 1fr)", gap: 4,
+                          maxHeight: 160, overflowY: "auto", padding: 8, marginBottom: 10,
+                          background: C.cream, borderRadius: 12, border: `1px solid ${C.borderLight}` }}>
+                          {OCCASION_EMOJIS.map((em) => (
+                            <button key={em} onClick={() => { setNewTypeEmoji(em); setEmojiPickerOpen(false); }}
+                              style={{ width: 36, height: 36, borderRadius: 8, display: "flex", alignItems: "center",
+                                justifyContent: "center", border: `1px solid ${newTypeEmoji === em ? C.copper : "transparent"}`,
+                                background: newTypeEmoji === em ? C.copperGlow : "transparent",
+                                cursor: "pointer", fontSize: 18, transition: "all .1s" }}
+                              onMouseEnter={e => { if (newTypeEmoji !== em) e.currentTarget.style.background = C.copperSubtle; }}
+                              onMouseLeave={e => { if (newTypeEmoji !== em) e.currentTarget.style.background = "transparent"; }}>
+                              {em}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button onClick={() => { setCreatingType(false); setNewTypeName(""); setNewTypeEmoji(""); setEmojiPickerOpen(false); }}
+                          style={{ padding: "8px 16px", borderRadius: 10, border: `1px solid ${C.borderLight}`,
+                            background: C.cream, cursor: "pointer", fontFamily: F.body, fontSize: 12, color: C.warmGray }}>
+                          Back
+                        </button>
+                        <Btn v="primary" sz="sm" onClick={() => createAndPickType(di)}
+                          style={{ flex: 1, opacity: newTypeName.trim() ? 1 : 0.5 }}>
+                          <Plus size={14} /> Create & use
+                        </Btn>
+                      </div>
+                    </>)}
                   </div>
                 ) : (
-                  <button onClick={() => setAddingOccForDay(di)}
+                  <button onClick={() => { setAddingOccForDay(di); setCreatingType(false); }}
                     style={{ padding: "12px 16px", borderRadius: 14, border: `2px dashed ${C.borderMedium}`,
                       background: "transparent", cursor: "pointer", display: "flex", alignItems: "center",
                       justifyContent: "center", gap: 8, fontFamily: F.body, fontSize: 13, color: C.copper,
@@ -1747,8 +2666,25 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, onSave, onExit }) {
           <div style={{ fontFamily: F.body, fontSize: 13, fontWeight: 600, color: C.copper }}>
             {dayEmoji(dayIdx)} {dayLabel(dayIdx)}
           </div>
-          <div style={{ fontFamily: F.body, fontSize: 11, color: C.softGray }}>
-            {currentOccasion?.label || "Outfit"} · {Object.values(currentOccasion?.slots || {}).filter(Boolean).length} items
+          <div style={{ fontFamily: F.body, fontSize: 11, color: C.softGray, display: "flex", alignItems: "center", gap: 4 }}>
+            {renamingOcc ? (
+              <form onSubmit={(e) => { e.preventDefault(); commitOccRename(); }} style={{ display: "inline-flex" }}>
+                <input ref={occRenameRef} value={renameVal} onChange={e => setRenameVal(e.target.value)}
+                  onBlur={commitOccRename} onKeyDown={e => { if (e.key === "Escape") { setRenamingOcc(false); setRenameVal(""); } }}
+                  style={{ fontFamily: F.body, fontSize: 11, color: C.charcoal, background: C.copperGlow,
+                    border: `1px solid ${C.copper}`, borderRadius: 6, padding: "2px 6px", outline: "none", width: 120 }} />
+              </form>
+            ) : (
+              <button onClick={() => { setRenamingOcc(true); setRenameVal(currentOccasion?.label || "Outfit"); }}
+                style={{ background: "none", border: "none", cursor: "pointer", padding: "1px 4px", borderRadius: 4,
+                  fontFamily: F.body, fontSize: 11, color: C.softGray, transition: "all .15s" }}
+                onMouseEnter={e => { e.currentTarget.style.background = C.copperGlow; e.currentTarget.style.color = C.copper; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = C.softGray; }}
+                title="Tap to rename">
+                {currentOccasion?.label || "Outfit"}
+              </button>
+            )}
+            <span>· {Object.values(currentOccasion?.slots || {}).filter(Boolean).length} items</span>
           </div>
         </div>
         <Btn v="sage" sz="sm" onClick={handleDoneOutfit}>
@@ -1762,7 +2698,7 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, onSave, onExit }) {
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             {currentDayOccasions.map((occ, i) => {
               const active = i === occIdx;
-              const typeInfo = OCCASION_TYPES.find(t => t.id === occ.type);
+              const typeInfo = allOccasionTypes.find(t => t.id === occ.type);
               return (
                 <button key={occ.id} onClick={() => { setEditing({ dayIdx, occIdx: i }); setSlotIdx(0); }}
                   style={{ padding: "6px 14px", borderRadius: 10, display: "flex", alignItems: "center", gap: 6,
@@ -1940,10 +2876,18 @@ export default function PackPal() {
   const [refillMode, setRefillMode] = useState(false);
   const [showRecs, setShowRecs] = useState(false);
   const [outfitMode, setOutfitMode] = useState(false);
+  const [outTheDoor, setOutTheDoor] = useState(false);
+  const [focusRefill, setFocusRefill] = useState(false);
+  const [chargeMode, setChargeMode] = useState(false);
+  const [focusCharge, setFocusCharge] = useState(false);
   const [wardrobe, setWardrobe] = usePersist("wardrobe", {});
+  const [customOccasions, setCustomOccasions] = usePersist("customOccasions", []);
+  const [otdItems, setOtdItems] = usePersist("otdItems", DEFAULT_OTD_ITEMS);
   const [searchQ, setSearchQ] = useState("");
   const [catFilter, setCatFilter] = useState(null);
+  const [secFilter, setSecFilter] = useState(null);
   const [histTrip, setHistTrip] = useState(null);
+  const { celebrate, CelebrationLayer } = useCelebration();
 
   // Wizard
   const [wStep, setWStep] = useState(0);
@@ -1977,21 +2921,79 @@ export default function PackPal() {
   };
 
   const toggle = (tid, iid) => {
+    const trip = trips.find(t => t.id === tid);
+    const item = trip?.items.find(i => i.id === iid);
+    const wasPacked = item?.packed;
     setTrips(p => p.map(t => t.id === tid ? { ...t, items: t.items.map(i => i.id === iid ? { ...i, packed: !i.packed } : i) } : t));
     if (activeTrip?.id === tid) setActiveTrip(p => ({ ...p, items: p.items.map(i => i.id === iid ? { ...i, packed: !i.packed } : i) }));
+    if (!wasPacked && item) {
+      haptic("light");
+      // Check if this completes a section, category, or everything
+      setTimeout(() => {
+        const t = trips.find(tr => tr.id === tid);
+        if (!t) return;
+        const updated = t.items.map(i => i.id === iid ? { ...i, packed: true } : i);
+        const sec = updated.filter(i => i.section === item.section);
+        const cat = updated.filter(i => i.category === item.category);
+        const all = updated;
+        if (all.every(i => i.packed)) celebrate("allPacked", "big");
+        else if (cat.every(i => i.packed)) celebrate("category", "medium");
+        else if (sec.every(i => i.packed)) celebrate("section", "small");
+      }, 50);
+    }
   };
   const toggleRefill = (tid, iid) => {
+    haptic("light");
     setTrips(p => p.map(t => t.id === tid ? { ...t, items: t.items.map(i => i.id === iid ? { ...i, needsRefill: !i.needsRefill } : i) } : t));
     if (activeTrip?.id === tid) setActiveTrip(p => ({ ...p, items: p.items.map(i => i.id === iid ? { ...i, needsRefill: !i.needsRefill } : i) }));
   };
+  const toggleRefilled = (tid, iid) => {
+    const trip = trips.find(t => t.id === tid);
+    const item = trip?.items.find(i => i.id === iid);
+    const wasRefilled = item?.refilled;
+    haptic("success");
+    setTrips(p => p.map(t => t.id === tid ? { ...t, items: t.items.map(i => i.id === iid ? { ...i, refilled: !i.refilled } : i) } : t));
+    if (activeTrip?.id === tid) setActiveTrip(p => ({ ...p, items: p.items.map(i => i.id === iid ? { ...i, refilled: !i.refilled } : i) }));
+    if (!wasRefilled && item) {
+      setTimeout(() => {
+        const t = trips.find(tr => tr.id === tid);
+        if (!t) return;
+        const updated = t.items.map(i => i.id === iid ? { ...i, refilled: true } : i);
+        const refillItems = updated.filter(i => i.needsRefill);
+        if (refillItems.length > 0 && refillItems.every(i => i.refilled)) celebrate("allRefilled", "medium");
+      }, 50);
+    }
+  };
+  const toggleCharge = (tid, iid) => {
+    haptic("light");
+    setTrips(p => p.map(t => t.id === tid ? { ...t, items: t.items.map(i => i.id === iid ? { ...i, needsCharge: !i.needsCharge } : i) } : t));
+    if (activeTrip?.id === tid) setActiveTrip(p => ({ ...p, items: p.items.map(i => i.id === iid ? { ...i, needsCharge: !i.needsCharge } : i) }));
+  };
+  const toggleCharged = (tid, iid) => {
+    const trip = trips.find(t => t.id === tid);
+    const item = trip?.items.find(i => i.id === iid);
+    const wasCharged = item?.charged;
+    haptic("success");
+    setTrips(p => p.map(t => t.id === tid ? { ...t, items: t.items.map(i => i.id === iid ? { ...i, charged: !i.charged } : i) } : t));
+    if (activeTrip?.id === tid) setActiveTrip(p => ({ ...p, items: p.items.map(i => i.id === iid ? { ...i, charged: !i.charged } : i) }));
+    if (!wasCharged && item) {
+      setTimeout(() => {
+        const t = trips.find(tr => tr.id === tid);
+        if (!t) return;
+        const updated = t.items.map(i => i.id === iid ? { ...i, charged: true } : i);
+        const chargeItems = updated.filter(i => i.needsCharge);
+        if (chargeItems.length > 0 && chargeItems.every(i => i.charged)) celebrate("allCharged", "medium");
+      }, 50);
+    }
+  };
   const addItem = (tid, sec, cat, name) => {
-    const ni = { id: id(), name, section: sec, category: cat, packed: false, essential: false, ff: false, freq: 0, needsRefill: false };
+    const ni = { id: id(), name, section: sec, category: cat, packed: false, essential: false, ff: false, freq: 0, needsRefill: false, needsCharge: false };
     setTrips(p => p.map(t => t.id === tid ? { ...t, items: [...t.items, ni] } : t));
     if (activeTrip?.id === tid) setActiveTrip(p => ({ ...p, items: [...p.items, ni] }));
   };
   const addRecItem = (name) => {
     if (!activeTrip) return;
-    const ni = { id: id(), name, section: "Smart Recommendations", category: "necessities", packed: false, essential: false, ff: false, freq: 0, needsRefill: false };
+    const ni = { id: id(), name, section: "Smart Recommendations", category: "necessities", packed: false, essential: false, ff: false, freq: 0, needsRefill: false, needsCharge: false };
     setTrips(p => p.map(t => t.id === activeTrip.id ? { ...t, items: [...t.items, ni] } : t));
     setActiveTrip(p => ({ ...p, items: [...p.items, ni] }));
   };
@@ -2004,7 +3006,7 @@ export default function PackPal() {
     if (activeTrip?.id === tid) { setActiveTrip(null); setView("home"); }
   };
   const dupTrip = (trip) => {
-    const ni = trip.items.map(i => ({ ...i, id: id(), packed: false, needsRefill: false }));
+    const ni = trip.items.map(i => ({ ...i, id: id(), packed: false, needsRefill: false, needsCharge: false }));
     const d = { ...trip, id: id(), items: ni, createdAt: new Date().toISOString(), destination: `${trip.destination} (copy)` };
     setTrips(p => [d, ...p]); setActiveTrip(d); setView("trip");
   };
@@ -2029,8 +3031,27 @@ export default function PackPal() {
 
   // ═══ GUIDED PACK ═══
   if (guidedMode && activeTrip) {
-    return <GuidedPack items={activeTrip.items} onToggle={iid => toggle(activeTrip.id, iid)}
-      onExit={() => setGuidedMode(false)} tripName={activeTrip.destination} />;
+    return <><GuidedPack items={activeTrip.items} onToggle={iid => toggle(activeTrip.id, iid)}
+      onToggleRefilled={iid => toggleRefilled(activeTrip.id, iid)}
+      onToggleCharged={iid => toggleCharged(activeTrip.id, iid)}
+      onRemove={iid => removeItem(activeTrip.id, iid)}
+      onExit={() => setGuidedMode(false)} tripName={activeTrip.destination} /><CelebrationLayer /></>;
+  }
+
+  // ═══ FOCUS REFILL ═══
+  if (focusRefill && activeTrip) {
+    return <><FocusRefill items={activeTrip.items}
+      onToggleRefill={iid => toggleRefill(activeTrip.id, iid)}
+      onToggleRefilled={iid => toggleRefilled(activeTrip.id, iid)}
+      onExit={() => setFocusRefill(false)} tripName={activeTrip.destination} /><CelebrationLayer /></>;
+  }
+
+  // ═══ FOCUS CHARGE ═══
+  if (focusCharge && activeTrip) {
+    return <><FocusCharge items={activeTrip.items}
+      onToggleCharge={iid => toggleCharge(activeTrip.id, iid)}
+      onToggleCharged={iid => toggleCharged(activeTrip.id, iid)}
+      onExit={() => setFocusCharge(false)} tripName={activeTrip.destination} /><CelebrationLayer /></>;
   }
 
   // ═══ SMART RECS ═══
@@ -2041,26 +3062,24 @@ export default function PackPal() {
 
   // ═══ OUTFIT BUILDER ═══
   if (outfitMode && activeTrip) {
-    return <OutfitBuilder trip={activeTrip} wardrobe={wardrobe} setWardrobe={setWardrobe}
+    return <><OutfitBuilder trip={activeTrip} wardrobe={wardrobe} setWardrobe={setWardrobe}
+      customOccasions={customOccasions} setCustomOccasions={setCustomOccasions}
+      celebrate={celebrate}
       onExit={() => setOutfitMode(false)}
       onSave={(occasions, dayNames, syncToList) => {
         if (syncToList) {
-          // Sync: save outfitPlan AND add/remove outfit items from packing list atomically
           const outfitItems = collectUniqueOutfitItems(occasions);
           const outfitNames = new Set(outfitItems.map(i => i.name.toLowerCase()));
           setTrips(p => p.map(t => {
             if (t.id !== activeTrip.id) return t;
-            // Keep non-outfit items + update outfit items to match current plan
             const nonOutfit = t.items.filter(i => i.category !== "outfits");
             const existingOutfit = t.items.filter(i => i.category === "outfits");
             const existingNames = new Set(existingOutfit.map(i => i.name.toLowerCase()));
-            // Keep existing outfit items that are still in the plan (preserves packed state)
             const kept = existingOutfit.filter(i => outfitNames.has(i.name.toLowerCase()));
-            // Add new outfit items not yet in the list
             const brandNew = outfitItems
               .filter(item => !existingNames.has(item.name.toLowerCase()))
               .map(item => ({ id: id(), name: item.name, category: "outfits", section: item.section,
-                packed: false, essential: false, ff: false, freq: 0, needsRefill: false }));
+                packed: false, essential: false, ff: false, freq: 0, needsRefill: false, needsCharge: false }));
             return { ...t, outfitPlan: occasions, outfitDayNames: dayNames, items: [...nonOutfit, ...kept, ...brandNew] };
           }));
           setActiveTrip(p => {
@@ -2071,15 +3090,28 @@ export default function PackPal() {
             const brandNew = outfitItems
               .filter(item => !existingNames.has(item.name.toLowerCase()))
               .map(item => ({ id: id(), name: item.name, category: "outfits", section: item.section,
-                packed: false, essential: false, ff: false, freq: 0, needsRefill: false }));
+                packed: false, essential: false, ff: false, freq: 0, needsRefill: false, needsCharge: false }));
             return { ...p, outfitPlan: occasions, outfitDayNames: dayNames, items: [...nonOutfit, ...kept, ...brandNew] };
           });
         } else {
-          // Background auto-save: just persist plan, don't touch items
           setTrips(p => p.map(t => t.id === activeTrip.id ? { ...t, outfitPlan: occasions, outfitDayNames: dayNames } : t));
           setActiveTrip(p => ({ ...p, outfitPlan: occasions, outfitDayNames: dayNames }));
         }
-      }} />;
+      }} /><CelebrationLayer /></>;
+  }
+
+  // ═══ OUT THE DOOR ═══
+  if (outTheDoor && activeTrip) {
+    const tripOtdChecked = activeTrip.otdChecked || {};
+    return <><OutTheDoor trip={activeTrip} otdItems={otdItems} setOtdItems={setOtdItems}
+      otdChecked={tripOtdChecked}
+      celebrate={celebrate}
+      setOtdChecked={(updater) => {
+        const update = typeof updater === "function" ? updater : () => updater;
+        setTrips(p => p.map(t => t.id === activeTrip.id ? { ...t, otdChecked: update(t.otdChecked || {}) } : t));
+        setActiveTrip(p => ({ ...p, otdChecked: update(p.otdChecked || {}) }));
+      }}
+      onExit={() => setOutTheDoor(false)} /><CelebrationLayer /></>;
   }
 
   // ═══ HISTORICAL TRIP DETAIL ═══
@@ -2355,16 +3387,23 @@ export default function PackPal() {
     let fitems = activeTrip.items;
     if (searchQ) { const q = searchQ.toLowerCase(); fitems = fitems.filter(i => i.name.toLowerCase().includes(q) || i.section.toLowerCase().includes(q)); }
     if (catFilter) fitems = fitems.filter(i => i.category === catFilter);
+    if (secFilter) fitems = fitems.filter(i => i.section === secFilter);
     const grouped = groupItems(fitems);
     const refillCount = activeTrip.items.filter(i => i.needsRefill).length;
+    const refilledCount = activeTrip.items.filter(i => i.needsRefill && i.refilled).length;
+    const refillPending = refillCount - refilledCount;
+    const chargeItemCount = activeTrip.items.filter(i => i.needsCharge).length;
+    const chargedCount = activeTrip.items.filter(i => i.needsCharge && i.charged).length;
+    const chargePending = chargeItemCount - chargedCount;
 
-    return (
+    return (<>
+      <CelebrationLayer />
       <div style={{ minHeight: "100vh", background: C.cream }}>
         {/* Header */}
         <div style={{ background: `linear-gradient(135deg,${C.warmWhite},${C.cream})`, padding: "20px 24px 24px",
           borderBottom: `1px solid ${C.borderLight}` }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
-            <button onClick={() => { setView("home"); setSearchQ(""); setCatFilter(null); setRefillMode(false); }}
+            <button onClick={() => { setView("home"); setSearchQ(""); setCatFilter(null); setSecFilter(null); setRefillMode(false); setChargeMode(false); }}
               style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
               <ArrowLeft size={20} color={C.warmGray} />
             </button>
@@ -2389,39 +3428,110 @@ export default function PackPal() {
             </div>
           </div>
 
-          {/* Actions */}
-          <div style={{ display: "flex", gap: 8, marginTop: 20, flexWrap: "wrap" }}>
+          {/* ── Primary Actions ── */}
+          <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
+            <Btn v="sage" sz="sm" onClick={() => setGuidedMode(true)} style={{ flex: 1 }}>
+              <Zap size={15} /> Focus Pack
+            </Btn>
             <Btn v="primary" sz="sm" onClick={() => setOutfitMode(true)} style={{ flex: 1 }}>
               <Shirt size={15} /> Build Outfits
             </Btn>
-            <Btn v="secondary" sz="sm" onClick={() => setGuidedMode(true)} style={{ flex: 1 }}>
-              <Zap size={15} /> Focus Pack
-            </Btn>
-          </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <Btn v="lavender" sz="sm" onClick={() => setFreakOut(true)} style={{ flex: 1 }}>
-              <Brain size={15} /> Freak Out
-            </Btn>
-            <Btn v="teal" sz="sm" onClick={() => setShowRecs(true)} style={{ flex: 1 }}>
-              <Sparkles size={14} /> Smart Recs
-            </Btn>
-          </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <Btn v={refillMode ? "sage" : "secondary"} sz="sm" onClick={() => setRefillMode(!refillMode)} style={{ flex: 1 }}>
-              <RefreshCw size={14} /> {refillMode ? `Done (${refillCount} refills)` : "Check Refills"}
-            </Btn>
-            <Btn v="secondary" sz="sm" onClick={() => {
-              setTrips(p => p.map(t => t.id === activeTrip.id ? { ...t, items: t.items.map(i => ({ ...i, packed: false })) } : t));
-              setActiveTrip(p => ({ ...p, items: p.items.map(i => ({ ...i, packed: false })) }));
-            }}><RotateCcw size={14} /></Btn>
           </div>
 
+          {/* ── Quick Actions ── */}
+          <div style={{ display: "flex", gap: 6, marginTop: 12, overflowX: "auto", paddingBottom: 2 }}>
+            {[
+              { label: "Out the Door", icon: <DoorOpen size={14} />, action: () => setOutTheDoor(true), color: C.copper },
+              { label: "Smart Recs", icon: <Sparkles size={14} />, action: () => setShowRecs(true), color: C.copper },
+              { label: "Freak Out", icon: <Brain size={14} />, action: () => setFreakOut(true), color: C.copper },
+              { label: "Reset", icon: <RotateCcw size={13} />, action: () => {
+                setTrips(p => p.map(t => t.id === activeTrip.id ? { ...t, items: t.items.map(i => ({ ...i, packed: false })) } : t));
+                setActiveTrip(p => ({ ...p, items: p.items.map(i => ({ ...i, packed: false })) }));
+              }, color: C.softGray },
+            ].map(({ label, icon, action, color }) => (
+              <button key={label} onClick={action} style={{ display: "flex", alignItems: "center", gap: 5,
+                padding: "6px 14px", borderRadius: 10, whiteSpace: "nowrap", cursor: "pointer",
+                background: C.warmWhite, border: `1px solid ${C.borderLight}`,
+                fontFamily: F.body, fontSize: 12, fontWeight: 500, color, transition: "all .15s",
+                flexShrink: 0 }}>
+                {icon} {label}
+              </button>
+            ))}
+          </div>
+
+          {/* ── Trip Prep ── */}
+          {(() => {
+            const hasRefills = refillCount > 0;
+            const hasCharges = chargeItemCount > 0;
+            const showPrep = hasRefills || hasCharges || refillMode || chargeMode;
+            if (!showPrep && st.pct < 100) return null;
+            if (st.pct === 100 && !showPrep) return null;
+            return (
+              <div style={{ marginTop: 14 }}>
+                <div style={{ fontFamily: F.body, fontSize: 10, fontWeight: 600, textTransform: "uppercase",
+                  letterSpacing: ".1em", color: C.softGray, marginBottom: 8, paddingLeft: 2 }}>Trip Prep</div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {/* Refill toggle */}
+                  <button onClick={() => { setRefillMode(!refillMode); setChargeMode(false); }}
+                    style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", borderRadius: 10,
+                      cursor: "pointer", fontFamily: F.body, fontSize: 12, fontWeight: 500, transition: "all .15s",
+                      background: refillMode ? `linear-gradient(135deg,${C.amber},#E8B84A)` : C.warmWhite,
+                      color: refillMode ? "#fff" : hasRefills ? C.amber : C.warmGray,
+                      border: `1px solid ${refillMode ? "transparent" : hasRefills ? "rgba(212,160,74,.3)" : C.borderLight}`,
+                      boxShadow: refillMode ? "0 2px 8px rgba(212,160,74,.3)" : "none" }}>
+                    <RefreshCw size={13} />
+                    {refillMode ? `Done (${refillCount})` : hasRefills ? `Refills ${refilledCount}/${refillCount}` : "Mark Refills"}
+                  </button>
+                  {/* Focus Refill */}
+                  {hasRefills && !refillMode && !chargeMode && (
+                    <button onClick={() => setFocusRefill(true)}
+                      style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", borderRadius: 10,
+                        cursor: "pointer", fontFamily: F.body, fontSize: 12, fontWeight: 500,
+                        background: C.amberGlow, color: C.amber, border: "1px solid rgba(212,160,74,.2)", transition: "all .15s" }}>
+                      <Zap size={12} /> Focus{refillPending > 0 ? ` (${refillPending})` : ""}
+                    </button>
+                  )}
+                  {/* Charge toggle */}
+                  <button onClick={() => { setChargeMode(!chargeMode); setRefillMode(false); }}
+                    style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", borderRadius: 10,
+                      cursor: "pointer", fontFamily: F.body, fontSize: 12, fontWeight: 500, transition: "all .15s",
+                      background: chargeMode ? `linear-gradient(135deg,${C.teal},#6BC4D8)` : C.warmWhite,
+                      color: chargeMode ? "#fff" : hasCharges ? C.teal : C.warmGray,
+                      border: `1px solid ${chargeMode ? "transparent" : hasCharges ? "rgba(78,173,197,.3)" : C.borderLight}`,
+                      boxShadow: chargeMode ? "0 2px 8px rgba(78,173,197,.3)" : "none" }}>
+                    <BatteryCharging size={13} />
+                    {chargeMode ? `Done (${chargeItemCount})` : hasCharges ? `Charges ${chargedCount}/${chargeItemCount}` : "Mark Charges"}
+                  </button>
+                  {/* Focus Charge */}
+                  {hasCharges && !chargeMode && !refillMode && (
+                    <button onClick={() => setFocusCharge(true)}
+                      style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", borderRadius: 10,
+                        cursor: "pointer", fontFamily: F.body, fontSize: 12, fontWeight: 500,
+                        background: C.tealGlow, color: C.teal, border: "1px solid rgba(78,173,197,.2)", transition: "all .15s" }}>
+                      <Zap size={12} /> Focus{chargePending > 0 ? ` (${chargePending})` : ""}
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Mode banners */}
           {refillMode && (
             <div style={{ marginTop: 12, background: C.amberGlow, borderRadius: 12, padding: "10px 16px",
               display: "flex", alignItems: "center", gap: 8, border: `1px solid rgba(212,160,74,.15)` }}>
               <RefreshCw size={14} color={C.amber} />
               <span style={{ fontFamily: F.body, fontSize: 13, color: C.amber }}>
-                Refill mode: tap items you need to restock before your trip
+                Tap items you need to restock before your trip
+              </span>
+            </div>
+          )}
+          {chargeMode && (
+            <div style={{ marginTop: 12, background: C.tealGlow, borderRadius: 12, padding: "10px 16px",
+              display: "flex", alignItems: "center", gap: 8, border: `1px solid rgba(78,173,197,.15)` }}>
+              <BatteryCharging size={14} color={C.teal} />
+              <span style={{ fontFamily: F.body, fontSize: 13, color: C.teal }}>
+                Tap devices you need to charge before your trip
               </span>
             </div>
           )}
@@ -2439,7 +3549,7 @@ export default function PackPal() {
               <X size={14} color={C.softGray} /></button>}
           </div>
           <div style={{ display: "flex", gap: 6, marginTop: 12, overflowX: "auto", paddingBottom: 4 }}>
-            <button onClick={() => setCatFilter(null)} style={{ padding: "6px 14px", borderRadius: 10, whiteSpace: "nowrap",
+            <button onClick={() => { setCatFilter(null); setSecFilter(null); }} style={{ padding: "6px 14px", borderRadius: 10, whiteSpace: "nowrap",
               border: `1px solid ${!catFilter ? C.copper : C.borderLight}`,
               background: !catFilter ? C.copperGlow : "transparent",
               fontFamily: F.body, fontSize: 12, fontWeight: 500, color: !catFilter ? C.copper : C.warmGray, cursor: "pointer" }}>All</button>
@@ -2447,7 +3557,7 @@ export default function PackPal() {
               const ci = activeTrip.items.filter(i => i.category === cat.id);
               if (!ci.length) return null;
               const cp = ci.filter(i => i.packed).length, active = catFilter === cat.id;
-              return (<button key={cat.id} onClick={() => setCatFilter(active ? null : cat.id)}
+              return (<button key={cat.id} onClick={() => { setCatFilter(active ? null : cat.id); setSecFilter(null); }}
                 style={{ padding: "6px 14px", borderRadius: 10, whiteSpace: "nowrap",
                   border: `1px solid ${active ? cat.color : C.borderLight}`,
                   background: active ? `${cat.color}15` : "transparent",
@@ -2457,6 +3567,40 @@ export default function PackPal() {
               </button>);
             })}
           </div>
+          {/* Section sub-pills — visible when a category is selected */}
+          {catFilter && (() => {
+            const catItems = activeTrip.items.filter(i => i.category === catFilter);
+            const sections = [...new Set(catItems.map(i => i.section))];
+            if (sections.length <= 1) return null;
+            const activeCat = CATEGORIES.find(c => c.id === catFilter);
+            return (
+              <div style={{ display: "flex", gap: 6, marginTop: 8, overflowX: "auto", paddingBottom: 4, flexWrap: "wrap" }}>
+                <button onClick={() => setSecFilter(null)} style={{ padding: "5px 12px", borderRadius: 8, whiteSpace: "nowrap",
+                  border: `1px solid ${!secFilter ? (activeCat?.color || C.copper) : C.borderLight}`,
+                  background: !secFilter ? `${activeCat?.color || C.copper}15` : "transparent",
+                  fontFamily: F.body, fontSize: 11, fontWeight: 500,
+                  color: !secFilter ? (activeCat?.color || C.copper) : C.softGray, cursor: "pointer" }}>
+                  All {activeCat?.label || ""}
+                </button>
+                {sections.map(sec => {
+                  const si = catItems.filter(i => i.section === sec);
+                  const sp = si.filter(i => i.packed).length;
+                  const active = secFilter === sec;
+                  return (
+                    <button key={sec} onClick={() => setSecFilter(active ? null : sec)}
+                      style={{ padding: "5px 12px", borderRadius: 8, whiteSpace: "nowrap",
+                        border: `1px solid ${active ? (activeCat?.color || C.copper) : C.borderLight}`,
+                        background: active ? `${activeCat?.color || C.copper}15` : "transparent",
+                        fontFamily: F.body, fontSize: 11, fontWeight: 500,
+                        color: active ? (activeCat?.color || C.copper) : C.softGray,
+                        cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
+                      {sec} <span style={{ opacity: .5 }}>{sp}/{si.length}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
 
         {/* Items */}
@@ -2481,7 +3625,11 @@ export default function PackPal() {
                       onToggle={iid => toggle(activeTrip.id, iid)} onRemove={iid => removeItem(activeTrip.id, iid)}
                       onAddItem={name => addItem(activeTrip.id, sec, cat.id, name)}
                       readOnly={false} refillMode={refillMode}
-                      onToggleRefill={iid => toggleRefill(activeTrip.id, iid)} />
+                      onToggleRefill={iid => toggleRefill(activeTrip.id, iid)}
+                      onToggleRefilled={iid => toggleRefilled(activeTrip.id, iid)}
+                      chargeMode={chargeMode}
+                      onToggleCharge={iid => toggleCharge(activeTrip.id, iid)}
+                      onToggleCharged={iid => toggleCharged(activeTrip.id, iid)} />
                   ))}
                 </div>
               </div>
@@ -2489,7 +3637,7 @@ export default function PackPal() {
           })}
         </div>
       </div>
-    );
+    </>);
   }
 
   // ═══ INSIGHTS ═══
