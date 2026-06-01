@@ -1,42 +1,22 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { Search, Plus, Check, ChevronRight, Plane, Sparkles, ArrowLeft, X, AlertTriangle, Clock, PackageCheck, Zap, RotateCcw, Trash2, Copy, Award, TrendingUp, Brain, BarChart3, Timer, Shield, RefreshCw, Thermometer, Wind, CloudRain, Umbrella, Heart, Eye, Star, Loader, Shirt, Gem, Watch, Footprints, ShoppingBag, Palette, ChevronLeft, Sun, Moon as MoonIcon, DoorOpen, GripVertical, Edit3, BatteryCharging, Battery } from "lucide-react";
+import { Search, Plus, Check, ChevronRight, Plane, Sparkles, ArrowLeft, X, AlertTriangle, Clock, PackageCheck, Zap, RotateCcw, Trash2, Copy, Award, TrendingUp, Brain, BarChart3, Timer, Shield, RefreshCw, Thermometer, Wind, CloudRain, Heart, Eye, Star, Loader, Shirt, Gem, Watch, Footprints, ShoppingBag, Palette, ChevronLeft, DoorOpen, Edit3, BatteryCharging } from "lucide-react";
+import { usePersist } from "./lib/store";
+import AccountBadge from "./components/Account";
+import { C, F } from "./lib/theme";
+import { id, haptic } from "./lib/utils";
+import { fetchWeather } from "./lib/weather";
+import { genList, genTripOtd, tempToRange } from "./lib/packing";
+import { TRIP_TYPES, TEMP_RANGES, CATEGORIES } from "./data/taxonomy";
+import { TEMP_RECS, SMART_RECS } from "./data/recommendations";
+import { UNFREEZE_STEPS, AFFIRMATIONS } from "./data/content";
+import { HIST_TRIPS } from "./data/history";
 
 // ═══════════════════════════════════════════════════════════════
 // PACKPAL v2 — Elizabeth's Personal Packing Intelligence
 // ═══════════════════════════════════════════════════════════════
 
-// ── Design Tokens ──
-const C = {
-  cream: "#FDF8F0", creamDark: "#F5EDE0", warmWhite: "#FEFCF9",
-  copper: "#C17F59", copperLight: "#D4A574",
-  copperGlow: "rgba(193,127,89,0.12)", copperSubtle: "rgba(193,127,89,0.06)",
-  sage: "#8BA888", sageLight: "#A8C4A5", sageDark: "#6B8B68",
-  sageGlow: "rgba(139,168,136,0.15)",
-  charcoal: "#2D2926", warmGray: "#6B635B", softGray: "#9B9490",
-  borderLight: "rgba(193,127,89,0.15)", borderMedium: "rgba(193,127,89,0.25)",
-  shadow: "rgba(45,41,38,0.06)", shadowMed: "rgba(45,41,38,0.10)",
-  danger: "#C75B5B", dangerGlow: "rgba(199,91,91,0.1)",
-  amber: "#D4A04A", amberGlow: "rgba(212,160,74,0.12)",
-  lavender: "#9B8EC4", lavenderGlow: "rgba(155,142,196,0.12)",
-  teal: "#4EADC5", tealGlow: "rgba(78,173,197,0.12)",
-};
-const F = {
-  display: "'Cormorant Garamond','Playfair Display',Georgia,serif",
-  body: "'DM Sans','Inter',-apple-system,sans-serif",
-};
-const id = () => Math.random().toString(36).substr(2, 9);
-
-// ── Haptic Feedback ──
-const haptic = (style = "light") => {
-  try {
-    if (navigator.vibrate) {
-      if (style === "light") navigator.vibrate(10);
-      else if (style === "medium") navigator.vibrate(20);
-      else if (style === "success") navigator.vibrate([12, 60, 12]);
-      else if (style === "celebration") navigator.vibrate([15, 40, 15, 40, 25]);
-    }
-  } catch (_) { /* silent */ }
-};
+// Design tokens (C = palette, F = fonts) and the id/haptic helpers now live in
+// shared modules — imported above. See ./lib/theme and ./lib/utils.
 
 // ── Confetti System ──
 const CONFETTI_COLORS = ["#C17F59", "#D4A574", "#8BA888", "#A8C4A5", "#D4A04A", "#E8B84A", "#9B8EC4", "#B8A8D8", "#4EADC5", "#F2C6DE", "#FFD700"];
@@ -130,625 +110,24 @@ function useCelebration() {
   return { celebrate, CelebrationLayer };
 }
 
-// ── Trip Types ──
-const TRIP_TYPES = [
-  { id: "city", label: "City Trip", icon: "🏙️", color: C.copper },
-  { id: "beach", label: "Beach / Tropical", icon: "🏝️", color: "#4EADC5" },
-  { id: "ski", label: "Ski / Snow", icon: "❄️", color: "#7BA3C9" },
-  { id: "business", label: "Business / Offsite", icon: "💼", color: C.sage },
-  { id: "festival", label: "Festival", icon: "🎪", color: "#C47EAA" },
-  { id: "safari", label: "Safari / Adventure", icon: "🌍", color: "#B8944F" },
-  { id: "roadtrip", label: "Road Trip", icon: "🚗", color: "#8B7355" },
-  { id: "international", label: "International", icon: "✈️", color: C.copperLight },
-];
+// TRIP_TYPES, TEMP_RANGES → ./data/taxonomy
 
-// ── Temperature Ranges ──
-const TEMP_RANGES = [
-  { id: "scorching", label: "Scorching", range: "95°F+", icon: "🔥", color: "#E85D3A" },
-  { id: "hot", label: "Hot", range: "80–95°F", icon: "☀️", color: "#E8993A" },
-  { id: "warm", label: "Warm", range: "65–80°F", icon: "🌤️", color: "#D4A04A" },
-  { id: "cool", label: "Cool", range: "50–65°F", icon: "🍂", color: "#8BA888" },
-  { id: "cold", label: "Cold", range: "32–50°F", icon: "🥶", color: "#7BA3C9" },
-  { id: "freezing", label: "Freezing", range: "Below 32°F", icon: "🧊", color: "#5B8CC9" },
-];
+// TEMP_RECS, SMART_RECS → ./data/recommendations
 
-// ── Temperature-Based Recommendations ──
-const TEMP_RECS = {
-  scorching: [
-    { name: "Ultra-lightweight linen/cotton clothes", why: "Maximum airflow in extreme heat" },
-    { name: "Wide-brimmed sun hat", why: "Protects face, ears, neck from UV" },
-    { name: "SPF 50+ mineral sunscreen", why: "Essential for intense UV exposure" },
-    { name: "Cooling towel or bandana", why: "Dampen to cool down quickly" },
-    { name: "Moisture-wicking underwear", why: "Prevents chafing in extreme heat" },
-    { name: "Electrolyte packets (extra)", why: "Replace sodium lost through sweat" },
-    { name: "Portable fan (rechargeable)", why: "Personal cooling on the go" },
-    { name: "Light-colored breathable sneakers", why: "Dark shoes absorb and trap heat" },
-  ],
-  hot: [
-    { name: "Short-sleeve cotton/linen shirts", why: "Breathable natural fibers wick sweat" },
-    { name: "Lightweight shorts or capris", why: "Leg airflow + sun protection" },
-    { name: "Thin cardigan for AC indoors", why: "Indoor spaces often over-air-conditioned" },
-    { name: "SPF 30-50 sunscreen + SPF lip balm", why: "Consistent UV protection" },
-    { name: "Breathable mesh sneakers", why: "Airflow prevents overheating feet" },
-    { name: "Moisture-wicking socks", why: "Keeps feet dry during activities" },
-  ],
-  warm: [
-    { name: "Light layering pieces", why: "Morning/evening temp swings" },
-    { name: "Light jacket or denim jacket", why: "Essential for cooler evenings" },
-    { name: "Comfortable jeans or casual pants", why: "Versatile for variable weather" },
-    { name: "Lightweight scarf", why: "Adds warmth + dresses up outfits" },
-    { name: "SPF 30 sunscreen", why: "UV protection even on mild days" },
-  ],
-  cool: [
-    { name: "Fleece or wool sweaters", why: "Significant warmth without bulk" },
-    { name: "Medium-weight jacket (water-resistant)", why: "Protection from wind + rain" },
-    { name: "Warm socks (wool blend)", why: "Temperature regulation for feet" },
-    { name: "Light gloves", why: "Hands are very temperature-sensitive" },
-    { name: "Warm base layer shirt", why: "Merino wool under main layer" },
-    { name: "Closed-toe insulated shoes", why: "Avoid mesh/breathable in cool weather" },
-  ],
-  cold: [
-    { name: "Insulated winter coat", why: "Windproof outer shell essential" },
-    { name: "Thermal base layers (top + bottom)", why: "Crucial layering foundation" },
-    { name: "Winter gloves or mittens", why: "Thermal lining prevents numbness" },
-    { name: "Warm beanie or winter hat", why: "Significant heat lost through head" },
-    { name: "Thick wool or thermal socks", why: "Prevents cold feet + frostbite risk" },
-    { name: "Waterproof insulated boots", why: "Protection from snow, ice, puddles" },
-    { name: "Heavy scarf or neck gaiter", why: "Protects face + neck from wind" },
-    { name: "Heavier moisturizer + lip balm", why: "Cold air strips skin moisture" },
-  ],
-  freezing: [
-    { name: "Heavy insulated parka (down/synthetic)", why: "Rated for extreme cold essential" },
-    { name: "Multiple thermal base layers", why: "Double up for serious insulation" },
-    { name: "Insulated waterproof snow pants", why: "Windproof with thermal lining" },
-    { name: "Extreme-weather mittens with liners", why: "Mittens warmer than gloves" },
-    { name: "Insulated boots rated for extreme cold", why: "Look for -20°F rating minimum" },
-    { name: "Balaclava or full face protection", why: "Prevents frostbite on exposed skin" },
-    { name: "Hand & toe warmers (chemical)", why: "Crucial backup heat source" },
-    { name: "Heavy-duty moisturizer + lip balm", why: "Freezing air extremely drying" },
-  ],
-};
+// CATEGORIES → ./data/taxonomy
 
-// ── Trip-Type Smart Recommendations (from research) ──
-const SMART_RECS = {
-  festival: [
-    { name: "Electrolyte packets (extra)", why: "Replace sodium lost through desert heat and dancing" },
-    { name: "Bandana or headwrap", why: "Shields from dust between stages" },
-    { name: "Extra portable power bank", why: "Phone drains fast with music/navigation/photos" },
-    { name: "Wet wipes (large pack)", why: "Essential hygiene at festival restrooms" },
-    { name: "Body glitter / face gems", why: "Festival fashion that makes friends" },
-    { name: "Dry shampoo", why: "Refreshes hair during multi-day events" },
-    { name: "Lightweight long-sleeve layer", why: "Desert nights drop dramatically after sunset" },
-    { name: "Rain poncho (compact)", why: "Weather can shift unexpectedly at outdoor events" },
-    { name: "Comfortable broken-in boots", why: "Miles of walking on uneven terrain" },
-    { name: "Earplugs (concert-grade)", why: "Protect hearing at loud stages, enable sleep" },
-  ],
-  beach: [
-    { name: "Reef-safe mineral sunscreen", why: "Protects coral and marine life" },
-    { name: "Waterproof phone pouch", why: "Keeps device dry during water activities" },
-    { name: "After-sun aloe vera gel", why: "Soothes inevitable sunburns quickly" },
-    { name: "Sand-free microfiber towel", why: "Dries 5x faster, shakes off sand easily" },
-    { name: "Mosquito repellent", why: "Prevents bites near tropical water" },
-    { name: "Quick-dry swimsuit cover-up", why: "Transition beach to restaurant easily" },
-    { name: "Waterproof bag for valuables", why: "Protects items from sand and salt" },
-    { name: "Rashguard or swim shirt", why: "UV protection while in water" },
-    { name: "Snorkel gear (if not provided)", why: "Personal gear is more hygienic" },
-  ],
-  ski: [
-    { name: "Lip balm with SPF 30+", why: "Altitude + sun + wind = chapped lips fast" },
-    { name: "Extra hand warmers (bulk)", why: "Crucial warmth on cold chairlift rides" },
-    { name: "Goggle anti-fog spray", why: "Prevents vision-blocking condensation on slopes" },
-    { name: "Merino wool base layers", why: "Moisture-wicking, odor-resistant, not cotton" },
-    { name: "Thermal neck gaiter", why: "Covers face and neck from windchill" },
-    { name: "Insulated water bottle", why: "Keeps drinks from freezing at altitude" },
-    { name: "Saline nasal spray", why: "Combats dry sinuses from altitude + heating" },
-    { name: "Boot dryer bags", why: "Dries boots overnight for next morning" },
-  ],
-  international: [
-    { name: "Universal power adapter", why: "Works across multiple outlet types worldwide" },
-    { name: "Voltage converter (if needed)", why: "Essential for single-voltage hair tools" },
-    { name: "Photocopies of passport", why: "Carry separately for emergencies" },
-    { name: "Travel insurance card/info", why: "Medical emergencies abroad need coverage" },
-    { name: "Local eSIM or SIM card plan", why: "Cheap data + local number abroad" },
-    { name: "Emergency contact card (printed)", why: "Backup if phone dies overseas" },
-    { name: "Small bills in local currency", why: "Tips and small purchases on arrival" },
-    { name: "Translation app downloaded offline", why: "Works without data connection" },
-  ],
-  business: [
-    { name: "Portable garment steamer", why: "Removes wrinkles without hotel iron" },
-    { name: "Stain remover pen", why: "Addresses coffee spills before they set" },
-    { name: "Backup outfit in carry-on", why: "Handles luggage delays gracefully" },
-    { name: "Presentation clicker/remote", why: "Move freely while presenting" },
-    { name: "USB drive with backup files", why: "Redundancy if laptop fails" },
-    { name: "Professional blazer", why: "Dresses up casual clothes for meetings" },
-    { name: "Laptop stand or riser", why: "Ergonomics during all-day sessions" },
-    { name: "Business cards", why: "Share contact info quickly at networking" },
-  ],
-  safari: [
-    { name: "Binoculars (8x42)", why: "Essential for wildlife viewing at distance" },
-    { name: "Quick-dry synthetic clothing", why: "Resists odor, dries fast with limited luggage" },
-    { name: "Headlamp with red-light mode", why: "Night movement without disturbing wildlife" },
-    { name: "Water purification tablets", why: "Safe drinking water anywhere" },
-    { name: "Dust covers for camera", why: "Protects gear in arid/sandy conditions" },
-    { name: "Extra memory cards + batteries", why: "Don't miss crucial wildlife moments" },
-    { name: "Lightweight day pack", why: "Carries water, sun gear, and camera" },
-    { name: "Neutral-colored clothing", why: "Avoids startling animals with bright colors" },
-  ],
-  roadtrip: [
-    { name: "Car phone mount", why: "Safe navigation without handheld distraction" },
-    { name: "Aux/USB-C audio cable", why: "Stream music to car audio system" },
-    { name: "Compact cooler bag", why: "Cold drinks and snacks without gas station stops" },
-    { name: "Emergency car kit", why: "Jumper cables, flashlight, first aid" },
-    { name: "Travel pillow + blanket", why: "Passenger comfort on long stretches" },
-    { name: "Rest stop refresh kit", why: "Face wipes, dry shampoo, deodorant" },
-    { name: "Reusable bags for groceries", why: "Stocking up at local stores along the way" },
-  ],
-  city: [
-    { name: "Comfortable broken-in walking shoes", why: "10+ mile urban exploration days" },
-    { name: "Crossbody anti-theft bag", why: "Deters pickpockets in crowded areas" },
-    { name: "Compact umbrella", why: "City weather shifts without warning" },
-    { name: "Transit card or contactless app", why: "Skip individual ticket lines" },
-    { name: "Collapsible water bottle", why: "Refill at fountains, shrinks when empty" },
-    { name: "Lightweight scarf or wrap", why: "Covers shoulders for religious sites" },
-    { name: "Portable phone charger", why: "Navigation + photos drain battery fast" },
-  ],
-};
+// CORE, COND_ITEMS → ./data/catalog
 
-// ── Categories ──
-const CATEGORIES = [
-  { id: "outfits", label: "Explore Outfits", icon: "👗", color: C.copper },
-  { id: "activewear", label: "Active & Chill", icon: "💪🏾", color: "#7BA3C9" },
-  { id: "necessities", label: "Travel Necessities", icon: "⚙️", color: C.sage },
-  { id: "tech", label: "Technology", icon: "📱", color: "#8B7355" },
-  { id: "toiletries", label: "Toiletries", icon: "🧴", color: "#C47EAA" },
-  { id: "checkout", label: "Out the Door", icon: "🚪", color: C.danger },
-];
+// UNFREEZE_STEPS, AFFIRMATIONS → ./data/content
 
-// ── Core Packing Data (from 22 trips) ──
-const CORE = {
-  necessities: {
-    "Luggage": [
-      { name: "Away Everywhere Bag", f: 1.0, e: true },
-      { name: "Away Checked Bag", f: 0.95, e: true },
-      { name: "Longchamp Purse", f: 0.9, e: true },
-      { name: "AirTags for Luggage", f: 0.9, e: true },
-      { name: "Luggage scale", f: 0.7 },
-    ],
-    "Important Documents": [
-      { name: "Driver's License", f: 1.0, e: true },
-      { name: "Chase Credit Card", f: 1.0, e: true },
-      { name: "Keys", f: 0.95, e: true },
-      { name: "Chase Debit Card", f: 0.8 },
-      { name: "$200 Cash", f: 0.8 },
-      { name: "Passport", f: 0.7, cond: ["international", "beach"] },
-      { name: "Corporate badge", f: 0.6, cond: ["business"] },
-      { name: "Boarding Passes", f: 0.6 },
-    ],
-    "Flight Comfort": [
-      { name: "Neck Brace", f: 0.95, e: true },
-      { name: "Eye Masks", f: 0.95, e: true },
-      { name: "Comfy compression socks", f: 0.85 },
-      { name: "Skincare Masks", f: 0.8 },
-    ],
-    "Hydration": [
-      { name: "Water Bottle", f: 0.95, e: true },
-      { name: "Liquid IV", f: 0.95, e: true },
-    ],
-    "Nutrition": [
-      { name: "Protein bars", f: 0.85 },
-      { name: "Bag of almonds", f: 0.3 },
-    ],
-    "Supplement Stack": [
-      { name: "Women's daily multivitamins", f: 0.95, e: true },
-      { name: "Iron supplements", f: 0.95, e: true },
-      { name: "Vitamin C supplements", f: 0.95, e: true },
-      { name: "Magnesium supplement", f: 0.95, e: true },
-      { name: "Probiotic supplement", f: 0.9, e: true },
-      { name: "Cravings supplement", f: 0.85 },
-      { name: "Metabolism supplement", f: 0.85 },
-    ],
-    "Energy: Sleep & Wake": [
-      { name: "Caffeine pills", f: 0.9, e: true },
-      { name: "Melatonin", f: 0.75 },
-      { name: "Vitamin B12 supplement", f: 0.75 },
-    ],
-    "Pain & Sickness": [
-      { name: "Advil", f: 0.95, e: true },
-      { name: "Tylenol", f: 0.9, e: true },
-      { name: "DayQuil/NyQuil", f: 0.3, cond: ["international"] },
-      { name: "Diarrhea medicine", f: 0.25, cond: ["international"] },
-      { name: "Benadryl", f: 0.2 },
-    ],
-    "Hygiene & Immune": [
-      { name: "Hand sanitizer spray", f: 0.9 },
-      { name: "Tissue", f: 0.5 },
-    ],
-    "Smell Management": [
-      { name: "Laundry Bag", f: 0.9, e: true },
-      { name: "Tampons", f: 0.7 },
-      { name: "Panty liners", f: 0.5 },
-    ],
-    "Eyewear": [
-      { name: "Contacts (6+ pairs)", f: 0.95, e: true },
-      { name: "Glasses", f: 0.95, e: true },
-      { name: "Eyeglasses cleaner", f: 0.9 },
-    ],
-    "Hair Supplies": [
-      { name: "Satin Pillowcase", f: 0.95, e: true, ff: true },
-      { name: "Satin Bonnet", f: 0.9, e: true, ff: true },
-      { name: "Hair Stockings", f: 0.85, ff: true },
-      { name: "Hair Ties", f: 0.8, ff: true },
-    ],
-  },
-  tech: {
-    "Devices": [
-      { name: "iPhone", f: 1.0, e: true },
-      { name: "Apple Watch", f: 0.95, e: true },
-      { name: "AirPods", f: 0.95, e: true },
-      { name: "AirPod Max", f: 0.9 },
-      { name: "Laptop", f: 0.9 },
-      { name: "iPad", f: 0.8 },
-      { name: "Kindle", f: 0.85 },
-      { name: "PDA", f: 0.7 },
-      { name: "Loop Earplugs", f: 0.6 },
-    ],
-    "Photography": [
-      { name: "Fujifilm X100VI Camera", f: 0.4, cond: ["beach", "international", "safari"] },
-      { name: "Mini Phone Mount", f: 0.4 },
-      { name: "Large Phone Tripod", f: 0.35 },
-      { name: "GoPro", f: 0.25, cond: ["beach", "safari", "festival"] },
-    ],
-    "Cables": [
-      { name: "USB-C to Lightning (2)", f: 0.95, e: true },
-      { name: "USB-C to USB-C (1)", f: 0.9, e: true },
-      { name: "USB to Apple Watch (1)", f: 0.9, e: true },
-      { name: "USB to PDA", f: 0.7 },
-      { name: "USB to Micro-USB (1)", f: 0.6 },
-    ],
-    "Power Blocks": [
-      { name: "Small USB-C (2)", f: 0.95, e: true },
-      { name: "Large USB-C (1)", f: 0.9, e: true },
-      { name: "USB (2)", f: 0.85 },
-    ],
-    "Power & Misc": [
-      { name: "Wireless Charging Power Bank", f: 0.9, e: true },
-      { name: "Power Bank", f: 0.85 },
-      { name: "Vanity Mirror", f: 0.8 },
-    ],
-    "Downloads & Setup": [
-      { name: "Movie downloads", f: 0.85 },
-      { name: "TV downloads", f: 0.85 },
-      { name: "Song downloads", f: 0.8 },
-      { name: "Podcast downloads", f: 0.8 },
-      { name: "Book downloads", f: 0.8 },
-      { name: "Google Maps offline map", f: 0.4, cond: ["international"] },
-      { name: "CBP app setup", f: 0.3, cond: ["international"] },
-    ],
-  },
-  toiletries: {
-    "Body Care": [
-      { name: "Deodorant", f: 1.0, e: true },
-      { name: "Body Wash", f: 0.95, e: true },
-      { name: "Shampoo", f: 0.95, e: true },
-      { name: "Lotion", f: 0.95, e: true },
-      { name: "Body Spray", f: 0.9 },
-      { name: "Loofah", f: 0.85 },
-    ],
-    "Dental": [
-      { name: "Toothbrush", f: 1.0, e: true },
-      { name: "Toothpaste", f: 1.0, e: true },
-    ],
-    "Hair Products": [
-      { name: "Edge control", f: 0.7, ff: true },
-      { name: "Regular brush", f: 0.6, ff: true },
-      { name: "Hair mousse", f: 0.6, ff: true },
-      { name: "Hair conditioner", f: 0.5, ff: true },
-      { name: "Hair shampoo", f: 0.5, ff: true },
-      { name: "Edge control mini brush", f: 0.5, ff: true },
-    ],
-    "Daytime Skincare": [
-      { name: "Foaming cleanser", f: 0.7 },
-      { name: "Micellar cleansing water", f: 0.65 },
-      { name: "Vitamin-C brightening serum", f: 0.6 },
-      { name: "Niacinamide + tranexamic acid serum", f: 0.55 },
-      { name: "Moisturizing sunscreen", f: 0.65, e: true },
-      { name: "Pantothenic B5 soothing cream", f: 0.55 },
-      { name: "Brow freeze", f: 0.85 },
-      { name: "Brow brush", f: 0.85 },
-      { name: "Lip Balm", f: 0.9, e: true },
-      { name: "Disposable face towels", f: 0.45 },
-      { name: "Exfoliating pore pads", f: 0.5 },
-    ],
-    "Nighttime Skincare": [
-      { name: "Lip Mask", f: 0.85, e: true },
-      { name: "Pimple patches", f: 0.8 },
-      { name: "Hydro soothing cream", f: 0.55 },
-      { name: "Good Genes Serum", f: 0.45 },
-      { name: "Makeup wipes", f: 0.5 },
-      { name: "Exfoliating pore pads", f: 0.45 },
-      { name: "Glycolic acid serum", f: 0.4 },
-      { name: "Retinol emulsion serum", f: 0.35 },
-    ],
-    "Cosmetics": [
-      { name: "Concealer (Fenty 420)", f: 0.95, e: true },
-      { name: "Mascara", f: 0.95, e: true },
-      { name: "Setting Spray", f: 0.9, e: true },
-      { name: "Blush", f: 0.9 },
-      { name: "Eyeshadow", f: 0.85 },
-      { name: "Freckle pen", f: 0.8 },
-      { name: "Brow Brush (Black)", f: 0.85 },
-      { name: "Lip oil", f: 0.6 },
-      { name: "Lip Gloss", f: 0.4 },
-      { name: "Beauty Blender", f: 0.85 },
-      { name: "Travel Brush Kit", f: 0.85 },
-    ],
-  },
-  activewear: {
-    "Underwear & Socks": [
-      { name: "Underwear", f: 1.0, e: true },
-      { name: "Socks", f: 1.0, e: true },
-    ],
-  },
-  checkout: {
-    "Out the Door": [
-      { name: "Phone", f: 1.0, e: true },
-      { name: "AirPods", f: 0.95, e: true },
-      { name: "Laptop", f: 0.9 },
-      { name: "Keys", f: 0.95, e: true },
-      { name: "Passport", f: 0.7, cond: ["international"] },
-      { name: "Driver's License", f: 0.95, e: true },
-      { name: "Credit Card", f: 0.95, e: true },
-      { name: "Work badge", f: 0.5, cond: ["business"] },
-    ],
-  },
-};
+// HIST_TRIPS → ./data/history
 
-// ── Conditional (Ski, Beach, etc.) ──
-const COND_ITEMS = {
-  ski: {
-    "Ski Outfits": [
-      "Heattech Top (2)", "Heattech Bottom (2)", "Ski Pants (2)", "Ski Jacket",
-      "Ski Technical Layer Bottom", "Ski Technical Layer Top",
-    ],
-    "Ski Accessories": ["Ski Socks (2)", "Ski Gloves", "Ski Beanie", "Ski Goggles"],
-    "Ski Technology": ["Heated Sock Batteries", "Digital Hand Warmers", "Heated Socks", "Hand Warmers"],
-    "Cold Weather Gear": ["Black beanie", "White beanie", "White gloves", "Black gloves", "Scarf"],
-  },
-  beach: {
-    "Swimwear": ["Bikini #1", "Bikini #2"],
-    "Sun Protection": ["Sun hat", "Aloe cream"],
-  },
-  international: {
-    "International Prep": ["Waterproof passport case", "Local ride app download"],
-  },
-  safari: {
-    "Safari Essentials": ["Bug spray", "Itch recovery cream", "Sun hat", "Portable fan"],
-  },
-};
-
-// ── Freak Out Mode: ADHD Paralysis Protocol ──
-const UNFREEZE_STEPS = [
-  {
-    title: "Breathe first",
-    icon: "🫁",
-    body: "You're frozen right now, and that's completely okay — your brain isn't broken, it's just overwhelmed. Place your feet flat on the floor. Take three slow breaths where your exhale is longer than your inhale (in for 4, out for 6). This tells your body \"we're safe right now.\"",
-    duration: "2 min",
-  },
-  {
-    title: "Ground yourself",
-    icon: "🌿",
-    body: "Look around and name 5 things you can see. Touch something near you and notice its texture. Listen for 2 sounds. This helps your brain come back to the present instead of spinning in overwhelm.",
-    duration: "2 min",
-  },
-  {
-    title: "Permission slip",
-    icon: "💌",
-    body: "This packing doesn't need to be perfect. It can be messy, chaotic, \"throw things in a bag\" energy. Give yourself explicit permission to pack in the least organized way possible. Perfection is a paralysis trap.",
-    duration: "30 sec",
-  },
-  {
-    title: "One tiny thing",
-    icon: "🧦",
-    body: "Don't think about packing everything. Pick ONE small item — a pair of socks, your phone charger, one shirt. Go get it. Place it near your bag. This is your first domino. It feels impossibly small, and that's exactly why it works.",
-    duration: "1 min",
-  },
-  {
-    title: "Activate your senses",
-    icon: "🎵",
-    body: "Put on a song you actually like — not a \"focusing\" playlist, but something that makes you want to move. Grab a drink you enjoy. Light a candle. You're giving your dopamine system what it needs to keep going.",
-    duration: "1 min",
-  },
-  {
-    title: "Build to two",
-    icon: "✌️",
-    body: "After that first item, grab one more. Two items isn't \"started packing\" but it IS momentum. You've proven to your brain that you can move. That's huge.",
-    duration: "2 min",
-  },
-  {
-    title: "Set a timer, then stop (or don't)",
-    icon: "⏱️",
-    body: "Set a timer for 10 minutes and pack during that time. When it goes off, you're done — guilt-free. Even if you've only packed 10 things. You unstuck yourself. That's the win. Keep going only if you want to.",
-    duration: "10 min",
-  },
-];
-
-const AFFIRMATIONS = [
-  "My brain is being my brain right now — not lazy, not broken, just dysregulated.",
-  "I don't have to see the whole staircase to take the first step.",
-  "Starting imperfectly beats planning perfectly.",
-  "Frozen doesn't mean failing. It means my brain needs a reset.",
-  "I'm allowed to do this the weird way, the slow way, the messy way.",
-  "One tiny thing is enough right now.",
-  "My activation energy is just higher than other people's. That's neurological, not personal.",
-  "I can do hard things. Right now I'm just doing small things first.",
-  "This freeze is temporary. My brain can shift — it just needs the right conditions.",
-  "My nervous system is trying to protect me. That's not weakness.",
-];
-
-// ── Viewable Historical Trips ──
-const HIST_TRIPS = [
-  { dest: "Thailand", dates: "Dec 7–15", days: 9, type: "international", icon: "🇹🇭",
-    sections: {
-      "Accessories": ["Gold Necklaces (3)", "Gold Bracelets (3)", "Gucci Sunglasses", "Rose Gold Sunglasses", "Gold Eyeglasses"],
-      "Activewear": ["Hiking boots", "Mini hiking backpack", "Pink running shoes"],
-      "Loungewear": ["Gold Birkenstocks"],
-      "Luggage": ["Away Everywhere Bag", "Away Checked Bag", "Longchamp Purse", "Luggage scale", "AirTags for Luggage"],
-      "Supplement Stack": ["Probiotic supplement", "Metabolism supplement", "Cravings supplement", "Magnesium supplement", "Iron supplements", "Vitamin C supplements", "Women's daily multivitamins"],
-      "Devices": ["Laptop", "Chromecast", "Loop Earplugs", "PDA", "Kindle", "Apple Watch", "AirPod Max", "AirPods", "iPad", "iPhone", "GoPro"],
-      "Skincare": ["Glow screen", "Lip Balm", "Facial Oil", "Hydrating Toner", "Facial Cleanser", "Cleansing oil", "Sunscreen", "Brow brush", "Brow freeze", "Rice + alpha-arbutin serum", "Vitamin C Serum", "Pimple patches", "Retinol emulsion serum", "Lip Mask", "Glycolic acid", "Hyaluronic acid", "Hydrating Mask", "Good Genes Serum"],
-      "Cosmetics": ["Brow Brush (Black)", "Lip Balm", "Lip Gloss", "Setting Spray", "Mascara", "Eyeshadow", "Freckle pen", "Blush", "Foundation stick", "Concealer (Fenty 420)", "Beauty Blender", "Travel Brush Kit"],
-    }
-  },
-  { dest: "Bora Bora", dates: "Oct 17–21", days: 5, type: "beach", icon: "🏝️",
-    sections: {
-      "Outfits": ["Turquoise Diarrablu set", "White lace bralette + flowy pants", "Navy cashmere tank + ombré pants", "Rose gold dress (photoshoot)", "Pink travel set"],
-      "Accessories": ["Gold & sparkly necklaces", "Gold & sparkly bracelets", "Leather flip flops", "Gold clutch", "Fawn Longchamp", "Artsy Sunglasses"],
-      "Swimwear": ["Pink bikini", "Teal bikini"],
-      "Photography": ["Fujifilm X100VI Camera", "Camera Battery Charger", "GoPro", "Mini Phone Mount", "Large Phone Tripod"],
-      "Skincare": ["Moisturizing sunscreen", "B5 soothing cream", "Vitamin-C serum", "Niacinamide serum", "Foaming cleanser", "Micellar water", "Lip Mask", "Pimple patches", "Good Genes serum", "Makeup wipes"],
-    }
-  },
-  { dest: "Morocco", dates: "Dec 29–Jan 7", days: 10, type: "international", icon: "🕌",
-    sections: {
-      "Outfits": ["Turquoise Diarrablu set", "Pink jogger set", "White tank top"],
-      "Accessories": ["Gold bracelets", "Sparkly bracelets", "Brown leather sandals", "Artsy Sunglasses", "White fanny pack", "Brown leather bag"],
-      "Nutrition": ["Trail mix", "Low sugar sweets", "Protein bars", "Healthy jerky"],
-      "Weather Gear": ["Hand warmers", "Umbrella", "White beanie", "White gloves", "Black gloves", "Black beanie"],
-      "Photography": ["Fujifilm X100VI Camera", "Camera Battery Charger", "Head Lamp", "Large Camera Tripod"],
-    }
-  },
-  { dest: "Seoul", dates: "Mar 3–10", days: 8, type: "international", icon: "🇰🇷",
-    sections: {
-      "Outfits": ["Black HeatTech long-sleeve", "Zevelyn Jean pants", "Black beanie", "Black boots", "Black puffer"],
-      "Accessories": ["Gold Necklaces (3)", "Gold Bracelets (3)", "Gucci Sunglasses", "Rose Gold Sunglasses"],
-      "Hiking Gear": ["Hiking boots", "Mini hiking backpack", "Pink running shoes"],
-      "Photography": ["GoPro", "Phone camera cleaner", "Phone Case with Magnet", "Mini Phone Mount"],
-    }
-  },
-  { dest: "Mammoth", dates: "Jan 9–11", days: 3, type: "ski", icon: "❄️",
-    sections: {
-      "Ski Outfits": ["Heattech Top (2)", "Heattech Bottom (2)", "Ski Pants (2)", "Ski Jacket", "Ski Technical Layers"],
-      "Ski Accessories": ["Ski Socks (2)", "Ski Gloves", "Ski Beanie", "Ski Goggles"],
-      "Ski Tech": ["Heated Sock Batteries", "Digital Hand Warmers", "Heated Socks", "Hand Warmers"],
-      "Cold Weather": ["Black beanie", "White beanie", "White gloves", "Scarf"],
-      "Swimwear": ["Lavender bikini"],
-      "Photography": ["Fujifilm X100VI Camera", "Camera Battery Charger", "Camera Wide Angle Lens"],
-    }
-  },
-  { dest: "Big Bear", dates: "Dec 22–24", days: 3, type: "ski", icon: "🏔️",
-    sections: { "Ski Gear": ["Heattech layers", "Ski pants", "Ski jacket", "Ski accessories", "Snow boots"], }
-  },
-  { dest: "New York", dates: "Jun 2–5", days: 4, type: "business", icon: "🏙️",
-    sections: {
-      "Outfits": ["Cream & white flowy pants + cashmere top", "Flowy sheer pants + cashmere", "Cream contour top + linen pants", "Brown belt", "Cream crew neck + blue yoga set (travel)"],
-      "Accessories": ["Brown sandals", "Gold sandals", "Cream tote bag", "Black Longchamp"],
-      "Activewear": ["Peloton set", "Green yoga set", "Pink yoga set"],
-      "Loungewear": ["AKA pajama pants", "Pink Nike set"],
-      "Hair": ["Edge control", "Hair mousse", "Edge control mini brush", "Satin Durag"],
-    }
-  },
-  { dest: "San Francisco", dates: "Various", days: 4, type: "business", icon: "🌉",
-    sections: { "Business": ["Corporate badge", "Brex card", "Business casual outfits"], }
-  },
-  { dest: "Seattle", dates: "Apr 29–May 1", days: 3, type: "business", icon: "🌧️",
-    sections: {
-      "Outfits": ["Black leather jacket", "Denim Zevelyn Jean pants", "Black contour top", "Black Diarrablu pants"],
-      "Accessories": ["Faux diamond necklace", "Black Doc Marten platform sandals", "Black Longchamp", "Artsy Sunglasses"],
-    }
-  },
-  { dest: "Coachella", dates: "April", days: 4, type: "festival", icon: "🎪",
-    sections: { "Festival": ["Festival outfits", "Comfortable boots", "Fanny pack", "Bandana"], }
-  },
-  { dest: "CDMX", dates: "Various", days: 5, type: "city", icon: "🇲🇽",
-    sections: { "City": ["Walking shoes", "Light layers", "Crossbody bag"], }
-  },
-  { dest: "San Diego", dates: "Various", days: 3, type: "beach", icon: "🏖️",
-    sections: { "Beach": ["Swimsuits", "Sun hat", "Sandals", "Cover-up"], }
-  },
-  { dest: "Atlanta", dates: "Various", days: 4, type: "city", icon: "🍑",
-    sections: { "City": ["Casual outfits", "Walking shoes", "Light jacket"], }
-  },
-  { dest: "Houston", dates: "Various", days: 3, type: "city", icon: "🤠",
-    sections: { "City": ["Light clothing", "Sun protection", "Comfortable shoes"], }
-  },
-  { dest: "Washington DC", dates: "Various", days: 4, type: "business", icon: "🏛️",
-    sections: { "Business": ["Professional outfits", "Walking shoes", "Umbrella"], }
-  },
-  { dest: "Oakland", dates: "Various", days: 3, type: "city", icon: "🌳",
-    sections: { "Casual": ["Layers for SF weather", "Walking shoes"], }
-  },
-  { dest: "Rhode Island", dates: "Various", days: 4, type: "beach", icon: "⛵",
-    sections: { "East Coast": ["Light layers", "Beach gear", "Walking shoes"], }
-  },
-  { dest: "Sunnyvale", dates: "Various", days: 3, type: "business", icon: "☀️",
-    sections: { "Business": ["Corporate badge", "Business casual", "Laptop"], }
-  },
-  { dest: "Nairobi", dates: "Various", days: 7, type: "safari", icon: "🦁",
-    sections: {
-      "Safari": ["Neutral clothing", "Bug spray", "Binoculars", "Headlamp"],
-      "Photography": ["Fujifilm X100VI Camera", "Dust covers", "Extra memory cards"],
-    }
-  },
-  { dest: "East Africa Multi", dates: "Various", days: 14, type: "safari", icon: "🌍",
-    sections: { "Multi-stop": ["Extended safari gear", "Multiple neutral outfits", "Extra supplements"], }
-  },
-];
-
-// ── List Generator ──
-function genList(types, days) {
-  const items = [];
-  const ts = Array.isArray(types) ? types : [types];
-  Object.entries(CORE).forEach(([catId, sections]) => {
-    if (catId === "checkout") return; // OTD items handled separately via trip.otdItems
-    Object.entries(sections).forEach(([sec, arr]) => {
-      arr.forEach((it) => {
-        if (it.cond && !it.cond.some((t) => ts.includes(t)) && it.f < 0.5) return;
-        if (it.f >= 0.3 || (days > 5 && it.f >= 0.2)) {
-          items.push({ id: id(), name: it.name, category: catId, section: sec, packed: false, essential: !!it.e, ff: !!it.ff, freq: it.f, needsRefill: false, needsCharge: false });
-        }
-      });
-    });
-  });
-  ts.forEach((t) => {
-    if (COND_ITEMS[t]) {
-      Object.entries(COND_ITEMS[t]).forEach(([sec, arr]) => {
-        const cat = t === "ski" || t === "beach" ? "activewear" : "necessities";
-        arr.forEach((name) => {
-          items.push({ id: id(), name, category: cat, section: sec, packed: false, essential: false, ff: false, freq: 0.7, needsRefill: false, needsCharge: false });
-        });
-      });
-    }
-  });
-  return items;
-}
-
-// Generate trip-specific OTD items by merging global defaults with checkout CORE data
-function genTripOtd(globalOtdItems, tripTypes) {
-  const ts = Array.isArray(tripTypes) ? tripTypes : [tripTypes];
-  // Start with a copy of the global defaults
-  const items = globalOtdItems.map(i => ({ ...i }));
-  const nameSet = new Set(items.map(i => i.name.toLowerCase()));
-  // Add any checkout CORE items not already in the list
-  if (CORE.checkout) {
-    Object.values(CORE.checkout).forEach(arr => {
-      arr.forEach(it => {
-        if (it.cond && !it.cond.some(t => ts.includes(t))) return;
-        if (!nameSet.has(it.name.toLowerCase())) {
-          items.push({ name: it.name, emoji: "📌" });
-          nameSet.add(it.name.toLowerCase());
-        }
-      });
-    });
-  }
-  return items;
-}
+// genList, genTripOtd → ./lib/packing
 
 // ── Persist ──
-function usePersist(key, def) {
-  const [s, setS] = useState(() => { try { const v = localStorage.getItem(`pp2_${key}`); return v ? JSON.parse(v) : def; } catch { return def; } });
-  useEffect(() => { try { localStorage.setItem(`pp2_${key}`, JSON.stringify(s)); } catch {} }, [key, s]);
-  return [s, setS];
-}
+// usePersist now lives in ./lib/store — it transparently syncs to Supabase when
+// signed in, and falls back to localStorage (these same pp2_* keys) offline.
+// Imported at the top of this file; the call sites below are unchanged.
 
 // ═══════════════════════════════════════════════════════
 // SUB-COMPONENTS
@@ -1281,7 +660,7 @@ function GuidedPack({ items, onToggle, onToggleRefilled, onToggleCharged, onRemo
 // ═══════════════════════════════════════════════════════
 // FOCUS REFILL
 // ═══════════════════════════════════════════════════════
-function FocusRefill({ items, onToggleRefill, onToggleRefilled, onExit, tripName }) {
+function FocusRefill({ items, onToggleRefill, onToggleRefilled, onExit }) {
   const needRefill = useMemo(() => items.filter(i => i.needsRefill), [items]);
   const notRefilled = useMemo(() => needRefill.filter(i => !i.refilled), [needRefill]);
   const [idx, setIdx] = useState(0);
@@ -1405,7 +784,7 @@ function FocusRefill({ items, onToggleRefill, onToggleRefilled, onExit, tripName
 // ═══════════════════════════════════════════════════════
 // FOCUS CHARGE
 // ═══════════════════════════════════════════════════════
-function FocusCharge({ items, onToggleCharge, onToggleCharged, onExit, tripName }) {
+function FocusCharge({ items, onToggleCharge, onToggleCharged, onExit }) {
   const needCharge = useMemo(() => items.filter(i => i.needsCharge), [items]);
   const notCharged = useMemo(() => needCharge.filter(i => !i.charged), [needCharge]);
   const [idx, setIdx] = useState(0);
@@ -2023,47 +1402,13 @@ function SmartRecsView({ tripTypes, tempRange, onAdd, onClose }) {
   );
 }
 
-// ── Weather Fetcher (Open-Meteo + wttr.in) ──
-async function fetchWeather(location) {
-  try {
-    // Try wttr.in first (accepts city names and zip codes)
-    const res = await fetch(`https://wttr.in/${encodeURIComponent(location)}?format=j1`);
-    if (res.ok) {
-      const data = await res.json();
-      const current = data.current_condition?.[0];
-      const forecast = data.weather?.slice(0, 7) || [];
-      return {
-        current: {
-          tempF: parseInt(current?.temp_F || "0"),
-          desc: current?.weatherDesc?.[0]?.value || "",
-          feelsLikeF: parseInt(current?.FeelsLikeF || "0"),
-          humidity: current?.humidity || "",
-        },
-        forecast: forecast.map(d => ({
-          date: d.date,
-          maxF: parseInt(d.maxtempF || "0"),
-          minF: parseInt(d.mintempF || "0"),
-          desc: d.hourly?.[4]?.weatherDesc?.[0]?.value || "",
-        })),
-      };
-    }
-  } catch {}
-  return null;
-}
+// fetchWeather → ./lib/weather
 
-function tempToRange(f) {
-  if (f >= 95) return "scorching";
-  if (f >= 80) return "hot";
-  if (f >= 65) return "warm";
-  if (f >= 50) return "cool";
-  if (f >= 32) return "cold";
-  return "freezing";
-}
+// tempToRange → ./lib/packing
 
 // ── Insights Component (Visual) ──
 function Insights({ trips }) {
   const total = trips.length + HIST_TRIPS.length;
-  const allTrips = [...trips, ...HIST_TRIPS.map(t => ({ ...t, items: [] }))];
   const avgItems = trips.length > 0 ? Math.round(trips.reduce((s, t) => s + (t.items?.length || 0), 0) / trips.length) : 0;
   const completed = trips.filter(t => { const p = (t.items || []).filter(i => i.packed).length; return p === (t.items || []).length && (t.items || []).length > 0; }).length;
 
@@ -3146,7 +2491,7 @@ export default function PackPal() {
       return { ...t, items: (t.items || []).filter(i => i.category !== "checkout"), otdItems: existing, otdChecked: t.otdChecked || {} };
     });
     if (changed) setTrips(migrated);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   const [searchQ, setSearchQ] = useState("");
   const [catFilter, setCatFilter] = useState(null);
@@ -3752,9 +3097,8 @@ export default function PackPal() {
           {(() => {
             const hasRefills = refillCount > 0;
             const hasCharges = chargeItemCount > 0;
-            const showPrep = hasRefills || hasCharges || refillMode || chargeMode;
-            if (!showPrep && st.pct < 100) return null;
-            if (st.pct === 100 && !showPrep) return null;
+            // Refill & Charge are always available: entering "mark" mode is how
+            // items get flagged in the first place, so it must never be gated.
             return (
               <div style={{ marginTop: 14 }}>
                 <div style={{ fontFamily: F.body, fontSize: 10, fontWeight: 600, textTransform: "uppercase",
@@ -4051,8 +3395,11 @@ export default function PackPal() {
     <div style={{ minHeight: "100vh", background: C.cream }}>
       <div style={{ padding: "48px 28px 32px",
         background: `linear-gradient(160deg,${C.warmWhite} 0%,${C.cream} 60%,rgba(193,127,89,.05) 100%)` }}>
-        <div style={{ fontFamily: F.body, fontSize: 12, fontWeight: 600, textTransform: "uppercase",
-          letterSpacing: ".12em", color: C.copper, marginBottom: 8 }}>PackPal</div>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 8 }}>
+          <div style={{ fontFamily: F.body, fontSize: 12, fontWeight: 600, textTransform: "uppercase",
+            letterSpacing: ".12em", color: C.copper }}>PackPal</div>
+          <AccountBadge />
+        </div>
         <h1 style={{ fontFamily: F.display, fontSize: 40, color: C.charcoal, fontWeight: 400, margin: 0, lineHeight: 1.15 }}>
           Pack smarter,<br />not harder.
         </h1>

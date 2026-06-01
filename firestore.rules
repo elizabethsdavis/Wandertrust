@@ -1,0 +1,27 @@
+rules_version = '2';
+
+// PackPal Firestore security rules.
+// Each signed-in user can read/write only their own profile + state. The
+// passkey credentials/challenges collections are touched solely by Cloud
+// Functions (the Admin SDK bypasses these rules), so clients are denied.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /users/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    match /state/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    match /credentials/{doc} {
+      allow read, write: if false;
+    }
+
+    match /challenges/{doc} {
+      allow read, write: if false;
+    }
+  }
+}
