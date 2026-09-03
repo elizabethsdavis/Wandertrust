@@ -1,6 +1,6 @@
-// Shared design tokens for the auth / account / onboarding screens.
-// Mirrors the palette defined inside PackPal.jsx so the new surfaces match
-// the copper / sage / cream system without refactoring the main component.
+// Shared design tokens — the single source for the copper / sage / cream
+// palette and the two font stacks. Every component imports C / F from here;
+// never redefine a color inline that already has a token.
 
 export const C = {
   cream: "#FDF8F0", creamDark: "#F5EDE0", warmWhite: "#FEFCF9",

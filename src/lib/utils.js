@@ -1,7 +1,7 @@
 // Small, dependency-free helpers shared across the whole app.
 
 /** Short, collision-resistant id for client-created entities (trips, items). */
-export const id = () => Math.random().toString(36).substr(2, 9);
+export const id = () => Math.random().toString(36).slice(2, 11);
 
 /**
  * Last user-perceived character (grapheme cluster) of a string. Used by the

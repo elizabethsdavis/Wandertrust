@@ -1,10 +1,9 @@
 import { HIST_TRIPS } from "../data/history";
+import { id } from "./utils";
 
 // Convert the app's 22 built-in historical lists (HIST_TRIPS) into real,
 // editable trips matching PackPal's internal trip/item shape. Used by the
 // one-time onboarding import.
-
-const rid = () => Math.random().toString(36).slice(2, 11);
 
 // Map a free-text historical section name onto one of PackPal's categories.
 // The original section name is preserved on each item, so the trip view still
@@ -29,7 +28,7 @@ export function histToTrip(h) {
     const category = categoryForSection(section);
     (names || []).forEach((name) => {
       items.push({
-        id: rid(),
+        id: id(),
         name,
         section,
         category,
@@ -43,7 +42,7 @@ export function histToTrip(h) {
     });
   }
   return {
-    id: rid(),
+    id: id(),
     destination: h.dest,
     tripType: h.type ? [h.type] : [],
     days: h.days || 4,
