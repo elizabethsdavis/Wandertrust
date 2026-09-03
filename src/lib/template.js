@@ -133,3 +133,10 @@ export function moveGroupItem(group, section, fromIndex, toIndex) {
   next.splice(toIndex, 0, it);
   return { ...group, [section]: next };
 }
+
+/** Rename section `oldName` to `newName` in place (same position); no-op if the name is empty / taken. */
+export function renameGroupSection(group, oldName, newName) {
+  const name = String(newName || "").trim();
+  if (!group || !(oldName in group) || !name || name === oldName || name in group) return group;
+  return Object.fromEntries(Object.keys(group).map((k) => [k === oldName ? name : k, group[k]]));
+}

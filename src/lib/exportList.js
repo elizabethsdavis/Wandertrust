@@ -31,9 +31,11 @@ function stamp(date = new Date()) {
 /**
  * tripToMarkdown(trip, opts) → string
  *   opts.otdItems   fallback Out-the-Door list when the trip has none
+ *   opts.categories resolved categories (label / emoji overrides); defaults to CATEGORIES
  *   opts.now        Date for the export stamp (tests pass a fixed one)
  */
 export function tripToMarkdown(trip, opts = {}) {
+  const cats = Array.isArray(opts.categories) ? opts.categories : CATEGORIES; // category label / emoji overrides, if any
   const items = Array.isArray(trip?.items) ? trip.items : [];
   const packed = items.filter((i) => i.packed).length;
   const lines = [];
@@ -54,10 +56,10 @@ export function tripToMarkdown(trip, opts = {}) {
     if (!secs.has(i.section)) secs.set(i.section, []);
     secs.get(i.section).push(i);
   }
-  const order = CATEGORIES.map((c) => c.id).filter((id) => byCat.has(id));
+  const order = cats.map((c) => c.id).filter((id) => byCat.has(id));
   for (const id of byCat.keys()) if (!order.includes(id)) order.push(id); // unknown categories last
   for (const catId of order) {
-    const cat = CATEGORIES.find((c) => c.id === catId);
+    const cat = cats.find((c) => c.id === catId);
     const secs = byCat.get(catId);
     const all = [...secs.values()].flat();
     const done = all.filter((i) => i.packed).length;
