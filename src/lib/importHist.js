@@ -17,8 +17,8 @@ export function categoryForSection(section = "") {
   if (/(weather|outerwear|jacket|coat|cold)/.test(s)) return "activewear";
   if (/(device|tech|electronic|charger|camera|photo|gadget)/.test(s)) return "tech";
   if (/(skincare|cosmetic|makeup|beauty|hair|toiletr|fragrance|nail|grooming)/.test(s)) return "toiletries";
-  if (/(supplement|vitamin|medic|meds|health|pharma|wellness)/.test(s)) return "toiletries";
-  if (/(luggage|bag|nutrition|snack|food|document|misc)/.test(s)) return "necessities";
+  if (/(supplement|vitamin|medic|meds|health|pharma|wellness|hydration|water|nutrition|snack|food)/.test(s)) return "health";
+  if (/(luggage|bag|document|misc)/.test(s)) return "necessities";
   return "necessities";
 }
 

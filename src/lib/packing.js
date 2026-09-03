@@ -19,7 +19,9 @@ export function genList(types, days, coreOverride) {
         // cond items like Passport / Corporate badge leak onto every trip.)
         if (it.cond && !it.cond.some((t) => ts.includes(t))) return;
         if (it.f >= 0.3 || (days > 5 && it.f >= 0.2)) {
-          items.push({ id: id(), name: it.name, category: catId, section: sec, packed: false, essential: !!it.e, ff: !!it.ff, freq: it.f, needsRefill: false, needsCharge: false });
+          // Template flags (refill / charge / laundry) are pre-set on the generated item.
+          items.push({ id: id(), name: it.name, category: catId, section: sec, packed: false, essential: !!it.e, ff: !!it.ff, freq: it.f,
+            needsRefill: !!it.needsRefill, needsCharge: !!it.needsCharge, needsWash: !!it.needsWash });
         }
       });
     });
