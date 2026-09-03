@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { User, LogOut, Fingerprint, Cloud, CloudOff, Check, Loader, X } from "lucide-react";
+import { User, LogOut, Fingerprint, Cloud, CloudOff, Check, Loader, X, RefreshCw, AlertTriangle } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { useStoreMeta } from "../lib/store";
 import { C, F } from "../lib/theme";
@@ -8,16 +8,25 @@ import { passkeysConfigured, registerPasskey, hasPasskeyHint } from "../lib/pass
 function syncMeta(syncState) {
   switch (syncState) {
     case "saving": return { label: "Syncing…", color: C.copper, Icon: Loader, spin: true };
-    case "error": return { label: "Saved on this device", color: C.amber, Icon: CloudOff, spin: false };
+    case "error": return { label: "Not synced — changes are only on this device", color: C.amber, Icon: CloudOff, spin: false };
+    case "full": return { label: "Not synced — too much data for the cloud", color: C.danger, Icon: AlertTriangle, spin: false };
     case "local": return { label: "On this device", color: C.softGray, Icon: CloudOff, spin: false };
     default: return { label: "Synced to cloud", color: C.sage, Icon: Cloud, spin: false };
   }
 }
 
+const fmtKB = (b) => `${Math.round(b / 1024).toLocaleString()} KB`;
+
 export default function AccountBadge() {
   const { user, isLocal, signOut } = useAuth();
-  const { syncState, flush } = useStoreMeta();
+  const { syncState, flush, sizeBytes, sizeLimit, lastRemoteAt } = useStoreMeta();
   const [signingOut, setSigningOut] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const retrySync = async () => {
+    setRetrying(true);
+    try { await flush(); } finally { setRetrying(false); }
+  };
+  const sizePct = sizeLimit ? Math.round((sizeBytes / sizeLimit) * 100) : 0;
 
   // Sign-out wipes the local mirror, so push anything unsaved first and let the
   // user back out if the cloud can't be reached.
@@ -38,7 +47,8 @@ export default function AccountBadge() {
   const [pkDone, setPkDone] = useState(hasPasskeyHint());
 
   const meta = syncMeta(syncState);
-  const dotColor = syncState === "idle" ? C.sage : syncState === "saving" ? C.copper : C.softGray;
+  const dotColor = syncState === "idle" ? C.sage : syncState === "saving" ? C.copper
+    : syncState === "error" ? C.amber : syncState === "full" ? C.danger : C.softGray;
 
   const addPasskey = async () => {
     setPkMsg("");
@@ -109,6 +119,40 @@ export default function AccountBadge() {
               </div>
             ) : (
               <>
+                {/* Sync problems — never silent */}
+                {syncState === "error" && (
+                  <div style={{ padding: "12px 14px", background: C.amberGlow, borderRadius: 14, marginBottom: 10,
+                    border: "1px solid rgba(212,160,74,.25)", display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ flex: 1, fontFamily: F.body, fontSize: 12.5, color: C.warmGray, lineHeight: 1.45 }}>
+                      Your latest changes are saved on this device but haven't reached the cloud. They'll retry automatically when you're back online.
+                    </div>
+                    <button onClick={retrySync} disabled={retrying}
+                      style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", borderRadius: 10, flexShrink: 0,
+                        border: "none", background: C.amber, color: "#fff", cursor: retrying ? "default" : "pointer",
+                        fontFamily: F.body, fontSize: 12.5, fontWeight: 600 }}>
+                      {retrying ? <Loader size={13} className="spin" /> : <RefreshCw size={13} />} Retry
+                    </button>
+                  </div>
+                )}
+                {syncState === "full" && (
+                  <div style={{ padding: "12px 14px", background: C.dangerGlow, borderRadius: 14, marginBottom: 10,
+                    border: "1px solid rgba(199,91,91,.25)", fontFamily: F.body, fontSize: 12.5, color: C.warmGray, lineHeight: 1.45 }}>
+                    <strong style={{ color: C.danger }}>Cloud sync is paused:</strong> your data ({fmtKB(sizeBytes)}) is over the {fmtKB(sizeLimit)} limit
+                    for a single account. Everything is still saved on this device. Deleting old trips frees space — trips with saved
+                    weather forecasts are the largest.
+                  </div>
+                )}
+                {lastRemoteAt && (
+                  <div style={{ fontFamily: F.body, fontSize: 12, color: C.softGray, padding: "0 4px 10px", lineHeight: 1.4 }}>
+                    Updated from another device {new Date(lastRemoteAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.
+                  </div>
+                )}
+                {syncState !== "full" && sizePct >= 50 && (
+                  <div style={{ fontFamily: F.body, fontSize: 12, color: sizePct >= 80 ? C.amber : C.softGray, padding: "0 4px 10px", lineHeight: 1.4 }}>
+                    Cloud storage {sizePct}% used ({fmtKB(sizeBytes)} of {fmtKB(sizeLimit)}). Deleting old trips frees space.
+                  </div>
+                )}
+
                 {/* Passkey */}
                 {passkeysConfigured() && (
                   <button onClick={addPasskey} disabled={pkBusy}
