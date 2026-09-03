@@ -1,20 +1,29 @@
 import { useState } from "react";
+import { DndContext, closestCenter, MeasuringStrategy } from "@dnd-kit/core";
+import { SortableContext, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { ArrowLeft, X, RotateCcw, Check, RefreshCw, BatteryCharging, WashingMachine } from "lucide-react";
 import { C, F } from "../lib/theme";
 import { CATEGORIES } from "../data/taxonomy";
-import { templateBase, FLAGS } from "../lib/template";
+import { templateBase, FLAGS, moveGroupSection, moveGroupItem } from "../lib/template";
+import { addinsBase, defaultAddins, TYPE_KEYS, WEATHER_KEYS } from "../lib/addins";
+import { useDndSensors, Grip } from "./dnd";
 
 // ─────────────────────────────────────────────────────────────
-// Packing Template editor.
+// Packing Template editor — two tabs.
 //
-// Lets the user customize the master catalog that seeds every NEW trip. Edits
-// are stored (by the caller) under a single additive `catalogTemplate` key —
-// `null` means "use the built-in CORE". genList() reads it at trip-creation
-// time, so existing trips are never touched.
+// "Default items": the master catalog that seeds every NEW trip, stored (by the
+// caller) under the additive `catalogTemplate` key — `null` means "use the
+// built-in CORE". Shape mirrors CORE: { categoryId: { section: [{name,f,e,ff,…}] } }.
+// The "checkout" category (the Out-the-Door list) is edited separately.
 //
-// The template mirrors CORE's shape: { categoryId: { section: [{name,f,e,ff}] } }.
-// The "checkout" category (the Out-the-Door list) is edited separately, so it's
-// excluded here.
+// "Add-ins": the items added ON TOP of the template when a new trip matches a
+// trip type or the weather, stored under the additive `addins` key — `null`
+// means the built-in COND_ITEMS. See lib/addins.js for the shape.
+//
+// Sections and items can be dragged into a new order (grip handles); the order
+// is simply the object-key / array order, which genList follows. Edits only
+// affect trips created afterwards.
 // ─────────────────────────────────────────────────────────────
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
@@ -57,56 +66,175 @@ function AddRow({ placeholder, accent, onAdd }) {
   );
 }
 
-export default function TemplateEditor({ template, setTemplate, onExit }) {
+// One editable item row: grip · name · flag toggles · remove.
+function ItemRow({ id, item, onRename, onToggleFlag, onRemove }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  return (
+    <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition, display: "flex", alignItems: "center", gap: 4,
+      padding: "2px 12px 2px 6px", borderRadius: 10, background: isDragging ? C.copperGlow : "transparent", position: "relative", zIndex: isDragging ? 2 : 1 }}>
+      <Grip attributes={attributes} listeners={listeners} label={`Drag ${item.name}`} size={28} />
+      <input
+        value={item.name}
+        onChange={(e) => onRename(e.target.value)}
+        aria-label="Item name"
+        style={{ flex: 1, minWidth: 0, fontFamily: F.body, fontSize: 14, color: C.charcoal, padding: "8px 8px",
+          border: "1.5px solid transparent", borderRadius: 8, background: "transparent", outline: "none" }}
+        onFocus={(e) => { e.target.style.borderColor = C.borderMedium; e.target.style.background = C.cream; }}
+        onBlur={(e) => { e.target.style.borderColor = "transparent"; e.target.style.background = "transparent"; }}
+      />
+      {FLAGS.map((flag) => {
+        const ui = FLAG_UI[flag]; const on = !!item[flag];
+        return (
+          <button key={flag} onClick={() => onToggleFlag(flag)} title={ui.title} aria-label={ui.title} aria-pressed={on}
+            style={{ width: 28, height: 28, borderRadius: 8, flexShrink: 0, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              border: `1px solid ${on ? "transparent" : C.borderLight}`, background: on ? ui.glow : "transparent" }}>
+            <ui.Icon size={13} color={on ? ui.color : C.borderMedium} />
+          </button>
+        );
+      })}
+      <button onClick={onRemove} aria-label="Remove"
+        style={{ background: "none", border: "none", cursor: "pointer", padding: 6, flexShrink: 0 }}>
+        <X size={15} color={C.softGray} />
+      </button>
+    </div>
+  );
+}
+
+// One section: draggable header + its own sortable item list + an add row.
+function SectionBlock({ id, name, items, accent, onChange, newItem, collapsed }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const sensors = useDndSensors();
+  const itemId = (i) => `${id}#${i}`;
+  const onItemDragEnd = ({ active, over }) => {
+    if (!over || active.id === over.id) return;
+    const from = Number(String(active.id).split("#").pop());
+    const to = Number(String(over.id).split("#").pop());
+    onChange((g) => moveGroupItem(g, name, from, to));
+  };
+  return (
+    <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition, marginBottom: 6, borderRadius: 12,
+      background: isDragging ? C.warmWhite : "transparent", border: `1px solid ${isDragging ? C.copper : "transparent"}`,
+      boxShadow: isDragging ? `0 8px 24px ${C.shadowMed}` : "none", position: "relative", zIndex: isDragging ? 3 : 1 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 16px 2px 6px" }}>
+        <Grip attributes={attributes} listeners={listeners} label={`Drag section ${name}`} size={28} />
+        <span style={{ flex: 1, fontFamily: F.body, fontSize: 11, fontWeight: 600, textTransform: "uppercase",
+          letterSpacing: ".08em", color: C.warmGray }}>{name}</span>
+        <span style={{ fontFamily: F.body, fontSize: 11, color: C.softGray }}>{items.length}</span>
+      </div>
+      {!collapsed && (<>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onItemDragEnd}>
+          <SortableContext items={items.map((_, i) => itemId(i))} strategy={verticalListSortingStrategy}>
+            {items.map((it, i) => (
+              <ItemRow key={itemId(i)} id={itemId(i)} item={it}
+                onRename={(v) => onChange((g) => ({ ...g, [name]: g[name].map((x, k) => (k === i ? { ...x, name: v } : x)) }))}
+                onToggleFlag={(flag) => onChange((g) => ({ ...g, [name]: g[name].map((x, k) => { if (k !== i) return x; const n = { ...x }; if (n[flag]) delete n[flag]; else n[flag] = true; return n; }) }))}
+                onRemove={() => onChange((g) => { const arr = g[name].filter((_, k) => k !== i); const n = { ...g }; if (arr.length) n[name] = arr; else delete n[name]; return n; })} />
+            ))}
+          </SortableContext>
+        </DndContext>
+        <AddRow placeholder={`Add to ${name}…`} accent={accent} onAdd={(v) => onChange((g) => ({ ...g, [name]: [...(g[name] || []), newItem(v)] }))} />
+      </>)}
+    </div>
+  );
+}
+
+// A card for one group ({ section: [items] }): a template category or an add-in group.
+function GroupEditor({ gid, icon, title, hint, accent, group, onChange, newItem, emptyText }) {
+  const sensors = useDndSensors();
+  const [draggingSection, setDraggingSection] = useState(false);
+  const names = Object.keys(group || {});
+  const secId = (i) => `${gid}/${i}`;
+  const onSectionDragEnd = ({ active, over }) => {
+    setDraggingSection(false);
+    if (!over || active.id === over.id) return;
+    const from = Number(String(active.id).split("/").pop());
+    const to = Number(String(over.id).split("/").pop());
+    onChange((g) => moveGroupSection(g, names[from], to));
+  };
+  return (
+    <div style={{ marginBottom: 22 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, padding: "10px 8px 6px" }}>
+        <span style={{ fontSize: 18 }}>{icon}</span>
+        <span style={{ fontFamily: F.display, fontSize: 20, color: C.charcoal, fontWeight: 500 }}>{title}</span>
+        {hint && <span style={{ fontFamily: F.body, fontSize: 12, color: C.softGray, flex: 1 }}>{hint}</span>}
+      </div>
+      <div style={{ background: C.warmWhite, borderRadius: 16, border: `1px solid ${C.borderLight}`, padding: "6px 0" }}>
+        {names.length === 0 && (
+          <div style={{ fontFamily: F.body, fontSize: 13, color: C.softGray, padding: "8px 16px" }}>{emptyText}</div>
+        )}
+        <DndContext sensors={sensors} collisionDetection={closestCenter} measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
+          onDragStart={() => setDraggingSection(true)} onDragCancel={() => setDraggingSection(false)} onDragEnd={onSectionDragEnd}>
+          <SortableContext items={names.map((_, i) => secId(i))} strategy={verticalListSortingStrategy}>
+            {names.map((name, i) => (
+              <SectionBlock key={name} id={secId(i)} name={name} items={group[name] || []} accent={accent} onChange={onChange} newItem={newItem}
+                collapsed={draggingSection} />
+            ))}
+          </SortableContext>
+        </DndContext>
+        <div style={{ borderTop: `1px solid ${C.borderLight}`, marginTop: 4, paddingTop: 4 }}>
+          <AddRow placeholder="New section name…" accent={accent} onAdd={(name) => onChange((g) => (g[name] ? g : { ...g, [name]: [] }))} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TabBtn({ active, onClick, children }) {
+  return (
+    <button onClick={onClick} aria-pressed={active}
+      style={{ flex: 1, padding: "9px 12px", borderRadius: 10, border: "none", cursor: "pointer",
+        background: active ? C.warmWhite : "transparent", color: active ? C.charcoal : C.warmGray,
+        fontFamily: F.body, fontSize: 13, fontWeight: 600, boxShadow: active ? `0 1px 4px ${C.shadow}` : "none" }}>
+      {children}
+    </button>
+  );
+}
+
+function SubHeading({ children }) {
+  return (
+    <div style={{ fontFamily: F.body, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".08em",
+      color: C.warmGray, padding: "18px 8px 4px" }}>{children}</div>
+  );
+}
+
+export default function TemplateEditor({ template, setTemplate, addins, setAddins, onExit }) {
+  const [tab, setTab] = useState("items");
   const [draft, setDraft] = useState(() => {
     const base = template ? clone(template) : coreDraft();
     delete base.checkout;
-    return base;
+    return { template: base, addins: addinsBase(addins) };
   });
-  const [dirty, setDirty] = useState(false);
+  const [dirty, setDirty] = useState({ template: false, addins: false });
   const [flash, setFlash] = useState(false);
+  const anyDirty = dirty.template || dirty.addins;
 
   const editable = CATEGORIES.filter((c) => c.id !== "checkout");
 
-  const mutate = (fn) => {
-    setDraft((prev) => {
-      const next = clone(prev);
-      fn(next);
-      return next;
-    });
-    setDirty(true);
+  // Every edit is "replace this one group": template category, or add-in group.
+  const setTemplateGroup = (catId, fn) => {
+    setDraft((prev) => ({ ...prev, template: { ...prev.template, [catId]: fn(prev.template[catId] || {}) } }));
+    setDirty((d) => ({ ...d, template: true }));
   };
-
-  const renameItem = (cat, sec, i, name) => mutate((d) => { d[cat][sec][i].name = name; });
-  const toggleFlag = (cat, sec, i, flag) => mutate((d) => { const it = d[cat][sec][i]; if (it[flag]) delete it[flag]; else it[flag] = true; });
-  const removeItem = (cat, sec, i) =>
-    mutate((d) => {
-      d[cat][sec].splice(i, 1);
-      if (d[cat][sec].length === 0) delete d[cat][sec];
-    });
-  const addItem = (cat, sec, name) =>
-    mutate((d) => {
-      if (!d[cat]) d[cat] = {};
-      if (!d[cat][sec]) d[cat][sec] = [];
-      d[cat][sec].push({ name, f: 1, e: false }); // user items: always included
-    });
-  const addSection = (cat, sec) =>
-    mutate((d) => {
-      if (!d[cat]) d[cat] = {};
-      if (!d[cat][sec]) d[cat][sec] = [];
-    });
+  const setAddinGroup = (kind, key, fn) => {
+    setDraft((prev) => ({ ...prev, addins: { ...prev.addins, [kind]: { ...prev.addins[kind], [key]: fn(prev.addins[kind]?.[key] || {}) } } }));
+    setDirty((d) => ({ ...d, addins: true }));
+  };
+  const templateItem = (name) => ({ name, f: 1, e: false }); // user items: always included
+  const addinItem = (name) => ({ name });
 
   const save = () => {
-    setTemplate(draft);
-    setDirty(false);
+    if (dirty.template) setTemplate(draft.template);
+    if (dirty.addins) setAddins(draft.addins);
+    setDirty({ template: false, addins: false });
     setFlash(true);
     setTimeout(() => setFlash(false), 1600);
   };
   const reset = () => {
-    if (!confirm("Reset the packing template back to the built-in defaults?")) return;
+    if (!confirm("Reset the packing template and its add-ins back to the built-in defaults?")) return;
     setTemplate(null);
-    setDraft(coreDraft());
-    setDirty(false);
+    setAddins(null);
+    setDraft({ template: coreDraft(), addins: defaultAddins() });
+    setDirty({ template: false, addins: false });
   };
 
   return (
@@ -125,82 +253,66 @@ export default function TemplateEditor({ template, setTemplate, onExit }) {
         </button>
       </div>
 
-      <div style={{ padding: "20px 18px 8px" }}>
-        <h2 style={{ fontFamily: F.display, fontSize: 28, color: C.charcoal, fontWeight: 400, margin: 0 }}>Your default items</h2>
-        <p style={{ fontFamily: F.body, fontSize: 14, color: C.warmGray, marginTop: 6, lineHeight: 1.5 }}>
-          Add, rename, or remove the items every <strong>new</strong> trip starts with, and pre-mark what needs a
-          refill, a charge, or a wash. Changes only affect trips you create from now on — existing lists stay as they are.
-          To pull a trip's edits back in here, open the trip and tap <strong>Save to template</strong>.
-        </p>
+      {/* Tabs */}
+      <div style={{ margin: "16px 18px 0", padding: 4, borderRadius: 13, background: C.creamDark, display: "flex", gap: 4 }}>
+        <TabBtn active={tab === "items"} onClick={() => setTab("items")}>Default items</TabBtn>
+        <TabBtn active={tab === "addins"} onClick={() => setTab("addins")}>Add-ins</TabBtn>
       </div>
 
-      {/* Categories */}
-      <div style={{ padding: "8px 16px" }}>
-        {editable.map((cat) => {
-          const sections = draft[cat.id] || {};
-          const accent = cat.color || C.copper;
-          return (
-            <div key={cat.id} style={{ marginBottom: 22 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 8px 6px" }}>
-                <span style={{ fontSize: 18 }}>{cat.icon}</span>
-                <span style={{ fontFamily: F.display, fontSize: 20, color: C.charcoal, fontWeight: 500 }}>{cat.label}</span>
-              </div>
-              <div style={{ background: C.warmWhite, borderRadius: 16, border: `1px solid ${C.borderLight}`, padding: "6px 0" }}>
-                {Object.keys(sections).length === 0 && (
-                  <div style={{ fontFamily: F.body, fontSize: 13, color: C.softGray, padding: "8px 16px" }}>
-                    No items yet — add a section below.
-                  </div>
-                )}
-                {Object.entries(sections).map(([sec, items]) => (
-                  <div key={sec} style={{ marginBottom: 6 }}>
-                    <div style={{ fontFamily: F.body, fontSize: 11, fontWeight: 600, textTransform: "uppercase",
-                      letterSpacing: ".08em", color: C.warmGray, padding: "8px 16px 4px" }}>{sec}</div>
-                    {items.map((it, i) => (
-                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "2px 12px 2px 16px" }}>
-                        <input
-                          value={it.name}
-                          onChange={(e) => renameItem(cat.id, sec, i, e.target.value)}
-                          style={{ flex: 1, fontFamily: F.body, fontSize: 14, color: C.charcoal, padding: "8px 10px",
-                            border: "1.5px solid transparent", borderRadius: 8, background: "transparent", outline: "none" }}
-                          onFocus={(e) => { e.target.style.borderColor = C.borderMedium; e.target.style.background = C.cream; }}
-                          onBlur={(e) => { e.target.style.borderColor = "transparent"; e.target.style.background = "transparent"; }}
-                        />
-                        {FLAGS.map((flag) => {
-                          const ui = FLAG_UI[flag]; const on = !!it[flag];
-                          return (
-                            <button key={flag} onClick={() => toggleFlag(cat.id, sec, i, flag)} title={ui.title} aria-label={ui.title} aria-pressed={on}
-                              style={{ width: 28, height: 28, borderRadius: 8, flexShrink: 0, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-                                border: `1px solid ${on ? "transparent" : C.borderLight}`, background: on ? ui.glow : "transparent" }}>
-                              <ui.Icon size={13} color={on ? ui.color : C.borderMedium} />
-                            </button>
-                          );
-                        })}
-                        <button onClick={() => removeItem(cat.id, sec, i)} aria-label="Remove"
-                          style={{ background: "none", border: "none", cursor: "pointer", padding: 6, flexShrink: 0 }}>
-                          <X size={15} color={C.softGray} />
-                        </button>
-                      </div>
-                    ))}
-                    <AddRow placeholder={`Add to ${sec}…`} accent={accent} onAdd={(name) => addItem(cat.id, sec, name)} />
-                  </div>
-                ))}
-                <div style={{ borderTop: `1px solid ${C.borderLight}`, marginTop: 4, paddingTop: 4 }}>
-                  <AddRow placeholder="New section name…" accent={accent} onAdd={(name) => addSection(cat.id, name)} />
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      {tab === "items" ? (
+        <>
+          <div style={{ padding: "20px 18px 8px" }}>
+            <h2 style={{ fontFamily: F.display, fontSize: 28, color: C.charcoal, fontWeight: 400, margin: 0 }}>Your default items</h2>
+            <p style={{ fontFamily: F.body, fontSize: 14, color: C.warmGray, marginTop: 6, lineHeight: 1.5 }}>
+              Add, rename, or remove the items every <strong>new</strong> trip starts with, pre-mark what needs a
+              refill, a charge, or a wash, and drag the grips to put sections and items in the order you pack them.
+              Changes only affect trips you create from now on — existing lists stay as they are.
+              To pull a trip's edits back in here, open the trip and tap <strong>Save to template</strong>.
+            </p>
+          </div>
+          <div style={{ padding: "8px 16px" }}>
+            {editable.map((cat) => (
+              <GroupEditor key={cat.id} gid={`t-${cat.id}`} icon={cat.icon} title={cat.label} accent={cat.color || C.copper}
+                group={draft.template[cat.id] || {}} onChange={(fn) => setTemplateGroup(cat.id, fn)} newItem={templateItem}
+                emptyText="No items yet — add a section below." />
+            ))}
+          </div>
+        </>
+      ) : (
+        <>
+          <div style={{ padding: "20px 18px 8px" }}>
+            <h2 style={{ fontFamily: F.display, fontSize: 28, color: C.charcoal, fontWeight: 400, margin: 0 }}>Add-ins</h2>
+            <p style={{ fontFamily: F.body, fontSize: 14, color: C.warmGray, marginTop: 6, lineHeight: 1.5 }}>
+              Items added <strong>on top of</strong> your default list when a new trip matches: by trip type, or by the
+              weather — the temperature band the wizard finds, and rain or snow in the forecast (you can also tick those
+              by hand on the weather step). New trips only, like everything here.
+            </p>
+          </div>
+          <div style={{ padding: "0 16px" }}>
+            <SubHeading>By trip type</SubHeading>
+            {TYPE_KEYS.map((k) => (
+              <GroupEditor key={k.id} gid={`a-${k.id}`} icon={k.icon} title={k.label} hint={`on every ${k.label} trip`} accent={k.color || C.copper}
+                group={draft.addins.types?.[k.id] || {}} onChange={(fn) => setAddinGroup("types", k.id, fn)} newItem={addinItem}
+                emptyText="Nothing extra for this trip type yet — add a section below." />
+            ))}
+            <SubHeading>By weather</SubHeading>
+            {WEATHER_KEYS.map((k) => (
+              <GroupEditor key={k.id} gid={`w-${k.id}`} icon={k.icon} title={k.label} hint={k.sub} accent={k.color || C.copper}
+                group={draft.addins.weather?.[k.id] || {}} onChange={(fn) => setAddinGroup("weather", k.id, fn)} newItem={addinItem}
+                emptyText="Nothing extra for this weather yet — add a section below." />
+            ))}
+          </div>
+        </>
+      )}
 
       {/* Save bar */}
-      {(dirty || flash) && (
-        <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, padding: "14px 18px",
+      {(anyDirty || flash) && (
+        <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, padding: "14px 18px", zIndex: 20,
           background: "rgba(253,248,240,.96)", backdropFilter: "blur(8px)", borderTop: `1px solid ${C.borderLight}`,
           display: "flex", justifyContent: "center" }}>
-          <button onClick={save} disabled={!dirty}
+          <button onClick={save} disabled={!anyDirty}
             style={{ width: "100%", maxWidth: 460, minHeight: 52, borderRadius: 14, border: "none",
-              cursor: dirty ? "pointer" : "default",
+              cursor: anyDirty ? "pointer" : "default",
               background: flash ? `linear-gradient(135deg,${C.sage},${C.sageLight})` : `linear-gradient(135deg,${C.copper},${C.copperLight})`,
               color: "#fff", fontFamily: F.body, fontSize: 16, fontWeight: 600,
               display: "flex", alignItems: "center", justifyContent: "center", gap: 9,

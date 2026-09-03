@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { User, LogOut, Fingerprint, Cloud, CloudOff, Check, Loader, X, RefreshCw, AlertTriangle } from "lucide-react";
+import { User, LogOut, Fingerprint, Cloud, CloudOff, Check, Loader, X, RefreshCw, AlertTriangle, RotateCw } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { useStoreMeta } from "../lib/store";
 import { C, F } from "../lib/theme";
 import { passkeysConfigured, registerPasskey, hasPasskeyHint } from "../lib/passkey";
+import { reloadApp, versionLabel } from "../lib/version";
 
 function syncMeta(syncState) {
   switch (syncState) {
@@ -42,6 +43,9 @@ export default function AccountBadge() {
     }
   };
   const [open, setOpen] = useState(false);
+  const [reloading, setReloading] = useState(false);
+  // The Home Screen "app" has no address bar, so this is the way to refresh it.
+  const doReload = async () => { setReloading(true); await reloadApp(flush); };
   const [pkBusy, setPkBusy] = useState(false);
   const [pkMsg, setPkMsg] = useState("");
   const [pkDone, setPkDone] = useState(hasPasskeyHint());
@@ -181,6 +185,19 @@ export default function AccountBadge() {
                 </button>
               </>
             )}
+
+            {/* Reload — the only way to refresh from the iPhone Home Screen "app" */}
+            <button onClick={doReload} disabled={reloading}
+              style={{ width: "100%", minHeight: 52, borderRadius: 14, cursor: reloading ? "default" : "pointer", marginTop: 10,
+                border: `1px solid ${C.borderLight}`, background: C.warmWhite,
+                display: "flex", alignItems: "center", gap: 12, padding: "0 16px",
+                fontFamily: F.body, fontSize: 14.5, fontWeight: 500, color: C.charcoal }}>
+              {reloading ? <Loader size={18} className="spin" color={C.copper} /> : <RotateCw size={18} color={C.copper} />}
+              {reloading ? "Reloading…" : "Reload app"}
+            </button>
+            <div style={{ fontFamily: F.body, fontSize: 11.5, color: C.softGray, textAlign: "center", marginTop: 12 }}>
+              Version {versionLabel()}
+            </div>
           </div>
         </div>
       )}

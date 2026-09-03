@@ -3,31 +3,14 @@
 // scroll. Every drop rebuilds `trip.items` via lib/reorder.js and hands the new
 // array back through onReorder — nothing else about the trip changes.
 import { useState } from "react";
-import { DndContext, closestCenter, PointerSensor, TouchSensor, KeyboardSensor, useSensor, useSensors } from "@dnd-kit/core";
-import { SortableContext, verticalListSortingStrategy, useSortable, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import { DndContext, closestCenter } from "@dnd-kit/core";
+import { SortableContext, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, ChevronRight, Check } from "lucide-react";
+import { ChevronRight, Check } from "lucide-react";
 import { C, F } from "../lib/theme";
 import { CATEGORIES } from "../data/taxonomy";
 import { groupForArrange, moveSection, moveItem } from "../lib/reorder";
-
-function useDndSensors() {
-  return useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  );
-}
-
-function Grip({ attributes, listeners, label }) {
-  return (
-    <button {...attributes} {...listeners} aria-label={label} title="Drag to reorder"
-      style={{ width: 32, height: 32, borderRadius: 8, border: "none", background: "transparent", cursor: "grab",
-        display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, touchAction: "none", color: C.softGray }}>
-      <GripVertical size={18} />
-    </button>
-  );
-}
+import { useDndSensors, Grip } from "./dnd";
 
 function SortableItem({ item }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
