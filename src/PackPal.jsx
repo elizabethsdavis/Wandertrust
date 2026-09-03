@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Search, Plus, Check, ChevronRight, Plane, Sparkles, ArrowLeft, X, AlertTriangle, Clock, PackageCheck, Zap, RotateCcw, Trash2, Copy, Award, TrendingUp, Brain, BarChart3, Timer, Shield, RefreshCw, Thermometer, Wind, CloudRain, Heart, Eye, Star, Loader, Shirt, Gem, Watch, Footprints, ShoppingBag, Palette, ChevronLeft, DoorOpen, Edit3, BatteryCharging } from "lucide-react";
-import { usePersist } from "./lib/store";
+import { usePersist, useStoreMeta } from "./lib/store";
 import AccountBadge from "./components/Account";
 import TemplateEditor from "./components/TemplateEditor";
 import { C, F } from "./lib/theme";
@@ -2466,7 +2466,15 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, customOccasions, setCustom
 export default function PackPal() {
   const [trips, setTrips] = usePersist("trips", []);
   const [view, setView] = useState("home");
-  const [activeTrip, setActiveTrip] = useState(null);
+  // The open trip is a *lookup* into `trips`, never a second copy. Every mutation
+  // goes through setTrips exactly once; the old paired setActiveTrip writes were a
+  // bug magnet (e.g. outfit items minted different ids in the two copies, so packing
+  // them was never persisted).
+  const [activeTripId, setActiveTripId] = useState(null);
+  const activeTrip = useMemo(
+    () => (activeTripId ? trips.find(t => t.id === activeTripId) || null : null),
+    [trips, activeTripId]
+  );
   const [guidedMode, setGuidedMode] = useState(false);
   const [freakOut, setFreakOut] = useState(false);
   const [refillMode, setRefillMode] = useState(false);
@@ -2483,8 +2491,14 @@ export default function PackPal() {
   const [catalogTemplate, setCatalogTemplate] = usePersist("catalogTemplate", null);
   const [editTemplate, setEditTemplate] = useState(false);
 
-  // Migration: move checkout category items into trip.otdItems and strip them from trip.items
+  // Migration: move checkout category items into trip.otdItems and strip them from trip.items.
+  // Idempotent: it only writes when a trip still has checkout items or lacks otdItems.
+  // Timing (audit B6): StoreProvider renders a splash until the cloud blob has loaded, so
+  // this component never mounts with stale/empty `trips`; the `ready` gate makes that
+  // invariant explicit instead of relying on the splash.
+  const { ready: storeReady } = useStoreMeta();
   useEffect(() => {
+    if (!storeReady) return;
     let changed = false;
     const migrated = trips.map(t => {
       const checkoutItems = (t.items || []).filter(i => i.category === "checkout");
@@ -2501,7 +2515,7 @@ export default function PackPal() {
       return { ...t, items: (t.items || []).filter(i => i.category !== "checkout"), otdItems: existing, otdChecked: t.otdChecked || {} };
     });
     if (changed) setTrips(migrated);
-  }, []);
+  }, [storeReady]);
 
   const [searchQ, setSearchQ] = useState("");
   const [catFilter, setCatFilter] = useState(null);
@@ -2539,7 +2553,7 @@ export default function PackPal() {
     const trip = { id: id(), ...nTrip, items, otdItems: tripOtd, otdChecked: {}, createdAt: new Date().toISOString(),
       icon: TRIP_TYPES.find(t => t.id === nTrip.tripType[0])?.icon || "✈️", weatherData };
     setTrips(p => [trip, ...p]);
-    setActiveTrip(trip);
+    setActiveTripId(trip.id);
     setView("trip");
     setNTrip({ destination: "", tripType: [], days: 4, weather: "warm", startDate: "", tempRange: "" });
     setWStep(0); setWeatherData(null);
@@ -2550,7 +2564,6 @@ export default function PackPal() {
     const item = trip?.items.find(i => i.id === iid);
     const wasPacked = item?.packed;
     setTrips(p => p.map(t => t.id === tid ? { ...t, items: t.items.map(i => i.id === iid ? { ...i, packed: !i.packed } : i) } : t));
-    if (activeTrip?.id === tid) setActiveTrip(p => ({ ...p, items: p.items.map(i => i.id === iid ? { ...i, packed: !i.packed } : i) }));
     if (!wasPacked && item) {
       haptic("light");
       // Check if this completes a section, category, or everything
@@ -2570,7 +2583,6 @@ export default function PackPal() {
   const toggleRefill = (tid, iid) => {
     haptic("light");
     setTrips(p => p.map(t => t.id === tid ? { ...t, items: t.items.map(i => i.id === iid ? { ...i, needsRefill: !i.needsRefill } : i) } : t));
-    if (activeTrip?.id === tid) setActiveTrip(p => ({ ...p, items: p.items.map(i => i.id === iid ? { ...i, needsRefill: !i.needsRefill } : i) }));
   };
   const toggleRefilled = (tid, iid) => {
     const trip = trips.find(t => t.id === tid);
@@ -2578,7 +2590,6 @@ export default function PackPal() {
     const wasRefilled = item?.refilled;
     haptic("success");
     setTrips(p => p.map(t => t.id === tid ? { ...t, items: t.items.map(i => i.id === iid ? { ...i, refilled: !i.refilled } : i) } : t));
-    if (activeTrip?.id === tid) setActiveTrip(p => ({ ...p, items: p.items.map(i => i.id === iid ? { ...i, refilled: !i.refilled } : i) }));
     if (!wasRefilled && item) {
       setTimeout(() => {
         const t = trips.find(tr => tr.id === tid);
@@ -2592,7 +2603,6 @@ export default function PackPal() {
   const toggleCharge = (tid, iid) => {
     haptic("light");
     setTrips(p => p.map(t => t.id === tid ? { ...t, items: t.items.map(i => i.id === iid ? { ...i, needsCharge: !i.needsCharge } : i) } : t));
-    if (activeTrip?.id === tid) setActiveTrip(p => ({ ...p, items: p.items.map(i => i.id === iid ? { ...i, needsCharge: !i.needsCharge } : i) }));
   };
   const toggleCharged = (tid, iid) => {
     const trip = trips.find(t => t.id === tid);
@@ -2600,7 +2610,6 @@ export default function PackPal() {
     const wasCharged = item?.charged;
     haptic("success");
     setTrips(p => p.map(t => t.id === tid ? { ...t, items: t.items.map(i => i.id === iid ? { ...i, charged: !i.charged } : i) } : t));
-    if (activeTrip?.id === tid) setActiveTrip(p => ({ ...p, items: p.items.map(i => i.id === iid ? { ...i, charged: !i.charged } : i) }));
     if (!wasCharged && item) {
       setTimeout(() => {
         const t = trips.find(tr => tr.id === tid);
@@ -2614,13 +2623,11 @@ export default function PackPal() {
   const addItem = (tid, sec, cat, name) => {
     const ni = { id: id(), name, section: sec, category: cat, packed: false, essential: false, ff: false, freq: 0, needsRefill: false, needsCharge: false };
     setTrips(p => p.map(t => t.id === tid ? { ...t, items: [...t.items, ni] } : t));
-    if (activeTrip?.id === tid) setActiveTrip(p => ({ ...p, items: [...p.items, ni] }));
   };
   const addRecItem = (name) => {
     if (!activeTrip) return;
     const ni = { id: id(), name, section: "Smart Recommendations", category: "necessities", packed: false, essential: false, ff: false, freq: 0, needsRefill: false, needsCharge: false };
     setTrips(p => p.map(t => t.id === activeTrip.id ? { ...t, items: [...t.items, ni] } : t));
-    setActiveTrip(p => ({ ...p, items: [...p.items, ni] }));
   };
   const addSection = (catId, secName) => {
     if (!activeTrip || !secName.trim()) return;
@@ -2630,18 +2637,16 @@ export default function PackPal() {
     // Add a placeholder item so the section appears — user will rename/add real items
     const ni = { id: id(), name: "New item", section: secName.trim(), category: catId, packed: false, essential: false, ff: false, freq: 0, needsRefill: false, needsCharge: false };
     setTrips(p => p.map(t => t.id === activeTrip.id ? { ...t, items: [...t.items, ni] } : t));
-    setActiveTrip(p => ({ ...p, items: [...p.items, ni] }));
     setAddingSec(null);
     setNewSecName("");
     haptic("success");
   };
   const removeItem = (tid, iid) => {
     setTrips(p => p.map(t => t.id === tid ? { ...t, items: t.items.filter(i => i.id !== iid) } : t));
-    if (activeTrip?.id === tid) setActiveTrip(p => ({ ...p, items: p.items.filter(i => i.id !== iid) }));
   };
   const deleteTrip = (tid) => {
     setTrips(p => p.filter(t => t.id !== tid));
-    if (activeTrip?.id === tid) { setActiveTrip(null); setView("home"); }
+    if (activeTripId === tid) { setActiveTripId(null); setView("home"); }
   };
   const dupTrip = (trip) => {
     // Fresh item ids + every progress flag cleared (packed / refill / charge).
@@ -2659,7 +2664,7 @@ export default function PackPal() {
       ...(trip.dayEmojis ? { dayEmojis: { ...trip.dayEmojis } } : {}),
       createdAt: new Date().toISOString(), destination: `${trip.destination} (copy)`,
     };
-    setTrips(p => [d, ...p]); setActiveTrip(d); setView("trip");
+    setTrips(p => [d, ...p]); setActiveTripId(d.id); setView("trip");
   };
 
   const stats = (t) => {
@@ -2733,20 +2738,8 @@ export default function PackPal() {
                 packed: false, essential: false, ff: false, freq: 0, needsRefill: false, needsCharge: false }));
             return { ...t, outfitPlan: occasions, outfitDayNames: dayNames, dayEmojis: dayEmojis || {}, items: [...nonOutfit, ...kept, ...brandNew] };
           }));
-          setActiveTrip(p => {
-            const nonOutfit = p.items.filter(i => i.category !== "outfits");
-            const existingOutfit = p.items.filter(i => i.category === "outfits");
-            const existingNames = new Set(existingOutfit.map(i => i.name.toLowerCase()));
-            const kept = existingOutfit.filter(i => outfitNames.has(i.name.toLowerCase()));
-            const brandNew = outfitItems
-              .filter(item => !existingNames.has(item.name.toLowerCase()))
-              .map(item => ({ id: id(), name: item.name, category: "outfits", section: item.section,
-                packed: false, essential: false, ff: false, freq: 0, needsRefill: false, needsCharge: false }));
-            return { ...p, outfitPlan: occasions, outfitDayNames: dayNames, dayEmojis: dayEmojis || {}, items: [...nonOutfit, ...kept, ...brandNew] };
-          });
         } else {
           setTrips(p => p.map(t => t.id === activeTrip.id ? { ...t, outfitPlan: occasions, outfitDayNames: dayNames, dayEmojis: dayEmojis || {} } : t));
-          setActiveTrip(p => ({ ...p, outfitPlan: occasions, outfitDayNames: dayNames, dayEmojis: dayEmojis || {} }));
         }
       }} /><CelebrationLayer /></>;
   }
@@ -2760,14 +2753,12 @@ export default function PackPal() {
       setOtdItems={(updater) => {
         const update = typeof updater === "function" ? updater : () => updater;
         setTrips(p => p.map(t => t.id === activeTrip.id ? { ...t, otdItems: update(t.otdItems || tripOtdList) } : t));
-        setActiveTrip(p => ({ ...p, otdItems: update(p.otdItems || tripOtdList) }));
       }}
       otdChecked={tripOtdChecked}
       celebrate={celebrate}
       setOtdChecked={(updater) => {
         const update = typeof updater === "function" ? updater : () => updater;
         setTrips(p => p.map(t => t.id === activeTrip.id ? { ...t, otdChecked: update(t.otdChecked || {}) } : t));
-        setActiveTrip(p => ({ ...p, otdChecked: update(p.otdChecked || {}) }));
       }}
       onExit={() => setOutTheDoor(false)} /><CelebrationLayer /></>;
   }
@@ -3104,7 +3095,6 @@ export default function PackPal() {
               { label: "Freak Out", icon: <Brain size={14} />, action: () => setFreakOut(true), color: C.copper },
               { label: "Reset", icon: <RotateCcw size={13} />, action: () => {
                 setTrips(p => p.map(t => t.id === activeTrip.id ? { ...t, items: t.items.map(i => ({ ...i, packed: false })) } : t));
-                setActiveTrip(p => ({ ...p, items: p.items.map(i => ({ ...i, packed: false })) }));
               }, color: C.softGray },
             ].map(({ label, icon, action, color }) => (
               <button key={label} onClick={action} style={{ display: "flex", alignItems: "center", gap: 5,
@@ -3464,7 +3454,7 @@ export default function PackPal() {
             {trips.map(trip => {
               const st = stats(trip);
               return (
-                <button key={trip.id} onClick={() => { setActiveTrip(trip); setView("trip"); }}
+                <button key={trip.id} onClick={() => { setActiveTripId(trip.id); setView("trip"); }}
                   style={{ display: "flex", alignItems: "center", gap: 16, padding: "18px 20px", borderRadius: 18,
                     background: C.warmWhite, border: `1px solid ${C.borderLight}`, cursor: "pointer",
                     textAlign: "left", width: "100%", transition: "all .2s", boxShadow: `0 2px 8px ${C.shadow}` }}
