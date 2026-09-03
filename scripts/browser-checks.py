@@ -460,7 +460,9 @@ with sync_playwright() as p:
     mj = man.json() if man.status == 200 else {}
     ok(man.status == 200 and mj.get("display") == "standalone" and any(i.get("sizes") == "512x512" for i in mj.get("icons", [])), "P1 manifest: standalone display, 512px icon")
     ok('rel="apple-touch-icon"' in html and 'rel="manifest"' in html and 'apple-mobile-web-app-title' in html, "P1 index.html links the touch icon, manifest and app title")
-    served = {f: page.request.get(BASE + f).status for f in ["/favicon.svg", "/icon-192.png", "/icon-512.png", "/favicon-32.png", "/version.json"]}
+    ok(re.search(r'rel="apple-touch-icon"[^>]*href="/apple-touch-icon\.png\?v=\d+"', html) is not None and 'image/svg+xml' not in html,
+       "P1 touch icon URL is cache-busted and there is no SVG favicon for iOS to prefer over it")
+    served = {f: page.request.get(BASE + f).status for f in ["/icon-192.png", "/icon-512.png", "/favicon-32.png", "/version.json"]}
     ok(all(v == 200 for v in served.values()), f"P1 favicon / manifest icons / version.json all served ({served})")
     ver = page.request.get(BASE + "/version.json").json()
     ok(page.get_by_role("button", name="Account").click() is None and page.get_by_text(f"Version {ver['version']}").count() == 1, f"P3 Account sheet shows the build version ({ver['version']})")
@@ -572,6 +574,36 @@ with sync_playwright() as p:
     ok(any(i["packed"] for i in [t for t in trips(page) if t["id"] == "old1"][0]["items"]), "L3 after Unlock, packing works again")
     page.screenshot(path=f"{SHOTS}/11-past-trip-unlocked.png")
     go_home(page)
+
+    # ── R1–R3: rename a section, rename a category + its emoji, change a trip's emoji ──
+    page.evaluate("() => localStorage.clear()"); page.reload(); page.get_by_role("button", name="New Trip").wait_for()
+    page.get_by_role("button", name="Packing Template").click(); page.get_by_role("heading", name="Your default items").wait_for()
+    sec = page.get_by_label("Section name Luggage", exact=True); sec.fill("Bags"); sec.press("Enter"); page.wait_for_timeout(200)
+    ok(page.get_by_label("Section name Bags", exact=True).count() == 1 and page.get_by_label("Drag section Bags", exact=True).count() == 1, "R1 section renamed in place (Luggage → Bags)")
+    cat = page.get_by_label("Category name Travel Necessities", exact=True); cat.fill("Essentials"); cat.press("Enter"); page.wait_for_timeout(200)
+    page.get_by_label("Change emoji for Essentials", exact=True).click()
+    page.get_by_role("dialog", name="Category emoji").wait_for()
+    page.get_by_label("Pick 🧭", exact=True).click(); page.wait_for_timeout(200)
+    ok(page.get_by_label("Change emoji for Essentials", exact=True).inner_text().strip() == "🧭" and page.get_by_label("Reset Travel Necessities name and emoji", exact=True).count() == 1,
+       "R2 category renamed + emoji picked; 'default' reset offered")
+    page.get_by_role("button", name="Save template").click(); page.get_by_role("button", name=re.compile(r"Saved")).wait_for()
+    tpl = json.loads(page.evaluate("localStorage.getItem('pp2_catalogTemplate') || 'null'")); cm = json.loads(page.evaluate("localStorage.getItem('pp2_categoryMeta') || '{}'"))
+    nec = list(tpl["necessities"].keys())
+    ok(nec[0] == "Bags" and "Luggage" not in nec and cm == {"necessities": {"label": "Essentials", "icon": "🧭"}}, f"R1/R2 persisted: sections {nec[:2]}, pp2_categoryMeta {cm}")
+    page.locator("button:has(svg.lucide-arrow-left)").first.click(); page.get_by_role("button", name="New Trip").wait_for()
+    create_trip(page, "Bologna", ["City Trip"])
+    bt = trips(page)[0]
+    ok(any(i["section"] == "Bags" for i in bt["items"]) and not any(i["section"] == "Luggage" for i in bt["items"]), "R1 new trip uses the renamed section")
+    ok(page.get_by_text("Essentials", exact=True).count() >= 1 and page.get_by_text("Travel Necessities", exact=True).count() == 0, "R2 trip view shows the renamed category")
+    page.get_by_role("button", name="Share", exact=True).click(); page.get_by_role("heading", name="Share list").wait_for()
+    md2 = page.locator("textarea[aria-label='Markdown preview']").input_value()
+    ok("## 🧭 Essentials" in md2, "R2 Markdown export uses the renamed category + emoji")
+    page.locator("button[aria-label='Close']").first.click()
+    page.get_by_role("button", name="Change trip emoji").click(); page.get_by_role("dialog", name="Trip emoji").wait_for()
+    page.get_by_label("Emoji", exact=True).fill("🍝"); page.get_by_role("button", name=re.compile(r"^Use ")).click(); page.wait_for_timeout(300)
+    ok(trips(page)[0]["icon"] == "🍝" and page.get_by_role("button", name="Change trip emoji").inner_text().strip() == "🍝", "R3 trip emoji changed from the header and persisted")
+    go_home(page)
+    ok("🍝" in page.locator("button", has_text="Bologna").first.inner_text(), "R3 Home card shows the new trip emoji")
 
     ok(not errors, f"No JS/page errors during the run ({len(errors)} captured)" + ("" if not errors else ": " + errors[0][:160]))
     print("Network failures (sandbox proxy, external resources only?):", *net, sep="\n  ")

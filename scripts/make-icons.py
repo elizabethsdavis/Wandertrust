@@ -6,8 +6,11 @@ in scripts/icon-src/). Renders a 1024×1024 cream tile with the glyph centred
   apple-touch-icon.png  180×180   iOS Home Screen (Add to Home Screen)
   icon-192.png          192×192   manifest (Android / Chrome)
   icon-512.png          512×512   manifest (any + maskable)
-  favicon-32.png        32×32     browser tab fallback
-  favicon.svg                     browser tab (vector, rounded)
+  favicon-32.png        32×32     browser tab
+
+(No SVG favicon on purpose: iOS Safari treats an unsized SVG icon as the
+largest icon available and uses it for Add to Home Screen, drawn small on a
+white tile, instead of apple-touch-icon.png.)
 
 Needs Playwright (Chromium) and Pillow — the same stack as browser-checks.py.
     pip install playwright pillow && python -m playwright install chromium
@@ -48,18 +51,3 @@ master = Image.open(io.BytesIO(png)).convert("RGB")
 for name, size in [("apple-touch-icon.png", 180), ("icon-192.png", 192), ("icon-512.png", 512), ("favicon-32.png", 32)]:
     master.resize((size, size), Image.LANCZOS).save(os.path.join(OUT, name), optimize=True)
     print("wrote", name)
-
-# Vector favicon: same glyph on a rounded cream tile. Nested <svg> keeps only
-# its viewBox/xmlns (a duplicate x/y/width/height attribute is a fatal XML error).
-import re
-open_tag = svg[:svg.index(">") + 1]
-keep = " ".join(m.group(0) for m in re.finditer(r'\b(viewBox|xmlns(?::\w+)?)="[^"]*"', open_tag))
-inner = f'<svg x="19%" y="19%" width="62%" height="62%" {keep}>' + svg[len(open_tag):]
-favicon = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFFCF7"/><stop offset=".55" stop-color="#FDF8F0"/><stop offset="1" stop-color="#F3E6D6"/></linearGradient></defs>
-<rect width="100" height="100" rx="22" fill="url(#bg)"/>
-{inner}
-</svg>
-"""
-open(os.path.join(OUT, "favicon.svg"), "w", encoding="utf-8").write(favicon)
-print("wrote favicon.svg")
