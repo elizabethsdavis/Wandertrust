@@ -89,7 +89,7 @@ export default function AccountBadge() {
             {isLocal ? (
               <div style={{ padding: "14px 16px", background: C.copperSubtle, borderRadius: 14,
                 fontFamily: F.body, fontSize: 13, color: C.warmGray, lineHeight: 1.5 }}>
-                You're in offline mode. To create an account and sync across devices, add your Supabase
+                You're in offline mode. To create an account and sync across devices, add your Firebase
                 keys to <code style={{ fontFamily: "monospace", color: C.copper }}>.env.local</code> — see <strong>SETUP.md</strong>.
               </div>
             ) : (
