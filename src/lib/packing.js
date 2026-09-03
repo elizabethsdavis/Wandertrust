@@ -5,10 +5,12 @@ import { id } from "./utils";
 
 // Generate a personalized list from the core catalog + conditional add-ons,
 // filtered by trip type and length.
-export function genList(types, days) {
+export function genList(types, days, coreOverride) {
   const items = [];
   const ts = Array.isArray(types) ? types : [types];
-  Object.entries(CORE).forEach(([catId, sections]) => {
+  // Use the user's edited template when present, else the built-in catalog.
+  const core = coreOverride || CORE;
+  Object.entries(core).forEach(([catId, sections]) => {
     if (catId === "checkout") return; // OTD items handled separately via trip.otdItems
     Object.entries(sections).forEach(([sec, arr]) => {
       arr.forEach((it) => {

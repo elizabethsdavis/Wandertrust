@@ -20,7 +20,9 @@ import { useAuth } from "./auth";
 const StoreCtx = createContext(null);
 
 const LS_PREFIX = "pp2_";
-const KNOWN_KEYS = ["trips", "wardrobe", "customOccasions", "otdItems"];
+// Every usePersist key. readLocal() only restores keys listed here, so a new
+// key MUST be added or it silently drops out of the offline / local-mode mirror.
+const KNOWN_KEYS = ["trips", "wardrobe", "customOccasions", "otdItems", "catalogTemplate"];
 
 function readLocal() {
   const data = {};
