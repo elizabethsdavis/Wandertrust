@@ -53,6 +53,7 @@ keep the graph honest.
 | `recommendations.js` | `TEMP_RECS` (by temperature band) + `SMART_RECS` (by trip type). |
 | `content.js` | `UNFREEZE_STEPS` + `AFFIRMATIONS` — Freak Out mode copy. |
 | `history.js` | `HIST_TRIPS` — the 22 historical trips (also the onboarding starter import). |
+| `otdDefaults.js` | `DEFAULT_OTD_ITEMS` — the default Out-the-Door checklist. |
 
 ### `src/lib/` — pure logic + infrastructure
 | File | Responsibility |
@@ -66,15 +67,26 @@ keep the graph honest.
 | `store.jsx` | `StoreProvider` + `usePersist()` — cloud-synced state with a localStorage mirror. |
 | `passkey.js` | WebAuthn register/login client. |
 | `importHist.js` | Converts `HIST_TRIPS` → editable trips for onboarding import. |
+| `localMirror.js` | The `pp2_*` localStorage mirror: read/write/clear + the `pp2_owner` uid tag. |
+| `merge.js` | `mergeState(base, local, remote)` — pure three-way merge used for multi-device sync. |
 
 ### `src/components/` — presentational + flow screens
-`AuthGate.jsx` (phone → OTP → passkey sign-in), `Account.jsx` (account sheet),
-`Onboarding.jsx` (one-time setup + import).
+Flow screens: `AuthGate.jsx` (phone → OTP → passkey sign-in), `Account.jsx`
+(account sheet: sync status, storage, passkey, sign out), `Onboarding.jsx`
+(one-time setup + import), `TemplateEditor.jsx` (editable packing template).
+
+Props-only leaf components (no store access; extracted from `PackPal.jsx`):
+`ui.jsx` (`ProgressRing`, `Btn`, `MiniBar`), `PackList.jsx` (`PackItem`,
+`PackSection`), `celebration.jsx` (`useCelebration` → confetti + toast),
+`FreakOutMode.jsx`, `GuidedPack.jsx` (Focus Pack), `FocusRefill.jsx`,
+`FocusCharge.jsx`, `SmartRecsView.jsx`, `Insights.jsx`, `GlobalOtdEditor.jsx`.
 
 ### `src/PackPal.jsx` — the application
-State, CRUD, view routing, and the in-file view components (trip view, wizard,
-Guided Pack, Insights, Outfit Builder, etc.). This is the one file still large
-enough to warrant further decomposition — see "What's next."
+State, CRUD, view routing, and the views that are wired tightly into trip state:
+Home, the new-trip wizard, the trip view, and the two in-file components
+`OutTheDoor` and `OutfitBuilder` (~2.3k lines). The open trip is *derived*
+(`activeTripId` + a lookup into `trips`), so every mutation goes through
+`setTrips` exactly once. See "What's next" for the remaining decomposition.
 
 ### Backend
 `functions/index.js` (callable Cloud Functions for passkeys), `firestore.rules`
@@ -89,8 +101,13 @@ enough to warrant further decomposition — see "What's next."
 3. **`StoreProvider`** loads the user's state on login and exposes it through
    `usePersist(key, default)`, which has the *exact* signature of the old
    localStorage hook — so view code never knows whether it's online.
-4. **Writes** flow `usePersist setter → debounced Firestore write + localStorage
-   mirror`. Reads prefer the cloud, fall back to the mirror when offline.
+4. **Writes** flow `usePersist setter → debounced, transactional Firestore write +
+   localStorage mirror`. Reads prefer the cloud, fall back to the mirror when offline.
+5. **Multi-device:** after the initial load the store listens with `onSnapshot`.
+   A change from another device is applied live when this device is clean, or
+   three-way merged (`lib/merge.js`) when it holds unsaved edits; the write
+   transaction merges the same way if the doc moved under it. Save failures and
+   the 1 MiB document limit are surfaced in the Account sheet (never silent).
 
 ### Two modes (automatic)
 - **Local** — no `VITE_FIREBASE_*` env vars: no login, pure `localStorage`.
@@ -147,11 +164,12 @@ Supabase → Firebase migration was done).
 
 ## What's next (intentional debt)
 
-`src/PackPal.jsx` (~3.5k lines) still contains the view components and the main
-orchestrator. The safe, recommended next step is to extract those components into
-`src/components/` **incrementally, with the dev server running**, so UI
-regressions are caught by eye — something a static build/lint pass cannot do.
-Good first candidates (self-contained, clear props): `ProgressRing`, `Btn`,
-`PackItem`/`PackSection`, the celebration subsystem (`ConfettiBurst`,
-`CelebrationToast`, `useCelebration`), then the larger mode screens
-(`GuidedPack`, `FreakOutMode`, `Insights`, `OutfitBuilder`).
+The props-only leaf components are out of `src/PackPal.jsx` (3.5k → 2.3k lines).
+What remains in-file is deliberate: `OutTheDoor` and `OutfitBuilder` reach into
+trip state and callbacks in ways the leaf components don't, and the audit flagged
+them as the risky extractions. Move them one at a time, and after each move run
+**both** harnesses — `scripts/browser-checks.py` (local mode, 36 checks, with
+screenshots you can pixel-diff against the previous run) and
+`scripts/cloud-checks.py` (cloud mode, 40 checks). Smaller nits still open:
+a few lists keyed by array index, and recurring inline hexes that could become
+`theme.js` tokens.

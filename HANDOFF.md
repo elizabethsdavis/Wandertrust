@@ -30,7 +30,8 @@ steps. The deeper docs are indexed below.
 - **On GitHub + deployed (2026-09-03):** the template/collapse features, these docs, and the Tier 1 fixes are on `origin/main` (`46056ba`…`fd7636a`, uploaded via the GitHub web UI) and live on Vercel.
 - **Tier 2 on GitHub + deployed (2026-09-03):** `34da6d3`…`4c5708e` (web-uploaded in three commits) — live on Vercel. Local `main` == `origin/main`.
 - **Tier 3 on GitHub + deployed (2026-09-03):** `da7ccc6`…`0a82b48` (web-uploaded in five commits) — live on Vercel. B10 still needs its one manual pass on the live site (see Tier 3 below). Local `main` == `origin/main`.
-- **Tier 4a + 4b committed locally (2026-09-03), not yet on GitHub — the multi-device release.** 4a: Firestore size guard, visible/retryable save failures, missing-doc guard. 4b: live `onSnapshot` sync + three-way merge (`src/lib/merge.js`) + transactional writes — last-write-wins is gone. Cloud-mode test rig: `scripts/cloud-sim/`, `scripts/cloud-checks.py` (40 checks). Files: `src/lib/store.jsx`, `src/lib/merge.js` (new), `src/components/Account.jsx`, `.gitignore`, `HANDOFF.md`, `scripts/cloud-checks.py` (new), `scripts/cloud-sim/fake-firebase.js` (new), `scripts/cloud-sim/vite.config.js` (new).
+- **Tier 4 (a + b) on GitHub + deployed (2026-09-03):** `0deea81`…`832e8fe` (web-uploaded in six commits) — live on Vercel. The multi-device manual check (phone + laptop) is still worth doing once. Local `main` == `origin/main`.
+- **Tier 4c committed locally (2026-09-03), not yet on GitHub:** the `PackPal.jsx` decomposition + the three nits + ARCHITECTURE.md refresh. Files: `src/PackPal.jsx`, 10 new `src/components/*.jsx`, `src/data/otdDefaults.js` (new), `src/lib/utils.js`, `src/lib/importHist.js`, `src/lib/theme.js`, `scripts/browser-checks.py`, `scripts/cloud-checks.py` (ports now overridable via `PP_BASE` / `PP_CLOUD_BASE`), `ARCHITECTURE.md`, `HANDOFF.md`.
 
 ## HARD CONSTRAINTS (do not skip)
 - The app is **live with real Firestore data**. **No change to the persisted data shape without a backward-compatible migration + fallback.** There is no schema version and no read-time normalizer, so every field name in the state blob is a frozen contract.
@@ -46,7 +47,7 @@ steps. The deeper docs are indexed below.
 
 ## AUDIT (3 evaluator subagents, this session)
 
-Overall: **B+ — "a senior engineer built this, but the main file is mid-refactor and has a few real bugs."** ESLint is clean; the build passes. `src/PackPal.jsx` is still ~3,500 lines holding ~20 view components + the orchestrator.
+Overall (at audit time): **B+ — "a senior engineer built this, but the main file is mid-refactor and has a few real bugs."** ESLint is clean; the build passes. `src/PackPal.jsx` was ~3,500 lines holding ~20 view components + the orchestrator — **now 2,306 with the leaf components in `src/components/`.** Every finding below is closed (✅) as of 2026-09-03.
 
 > ⚠️ The production-runtime-error check (`get_runtime_errors`) was interrupted (permission) and still needs running.
 
@@ -74,9 +75,9 @@ Overall: **B+ — "a senior engineer built this, but the main file is mid-refact
 - **Confirmed additive/non-breaking:** `catalogTemplate` (except the `KNOWN_KEYS` gap, B2) and the collapse feature (pure UI, nothing persisted).
 
 ### Structure / quality (architecture audit)
-- **Decompose `PackPal.jsx` — SAFE leaf components to extract first** (props-only, deps already in lib/data): `ProgressRing`, `Btn`, `MiniBar`, `PackItem`, `PackSection`, the celebration subsystem (`ConfettiBurst`/`CelebrationToast`/`useCelebration`), `FreakOutMode`, `FocusRefill`, `FocusCharge`, `SmartRecsView`, `Insights`, `GlobalOtdEditor`. **Do it with the dev server running** (visual regressions a build can't catch). **RISKIER:** `OutfitBuilder`, `OutTheDoor` — extract later, carefully.
+- ✅ **DONE (Tier 4c) — `PackPal.jsx` decomposed** 3,519 → 2,306 lines: `ProgressRing`/`Btn`/`MiniBar` → `components/ui.jsx`; `PackItem`/`PackSection` → `PackList.jsx`; the celebration subsystem → `celebration.jsx`; `FreakOutMode`, `GuidedPack`, `FocusRefill`, `FocusCharge`, `SmartRecsView`, `Insights`, `GlobalOtdEditor` → one file each; `DEFAULT_OTD_ITEMS` → `data/otdDefaults.js`. Mechanical line-range moves (`no-undef` clean, zero warnings), bundle size unchanged (528.5 kB → 528.5 kB), both harnesses green, and the harness screenshots pixel-diffed against a pre-extraction baseline: identical once animations settle. **Still in-file on purpose:** `OutTheDoor`, `OutfitBuilder` (the risky ones).
 - ✅ **DONE (Tier 3):** `activeTrip` is now derived — `activeTripId` state + `useMemo(() => trips.find(...))`; all ~12 paired `setActiveTrip` writes removed, every mutation goes through `setTrips` once. This fixed a **real live bug**: the Outfit Builder's sync minted *different* item ids in the two copies, so packing a freshly synced outfit item was never persisted (reproduced by `scripts/browser-checks.py` against `4c5708e`, fixed after).
-- Nits: `id()` uses deprecated `substr` (+ a duplicate `rid()` in `importHist.js`); several lists keyed by array index; recurring inline hexes should become `theme.js` tokens; `theme.js` has a stale "mirror" comment.
+- Nits: ✅ `id()` now uses `slice(2, 11)` (same output); ✅ `importHist.js` uses the shared `id()`; ✅ `theme.js` header rewritten. Still open (cosmetic): several lists keyed by array index; recurring inline hexes that could become `theme.js` tokens.
 
 ---
 
@@ -87,7 +88,7 @@ Overall: **B+ — "a senior engineer built this, but the main file is mid-refact
 **Tier 3 — ✅ DONE (2026-09-03):** B10, `activeTrip` derivation, B6 (false positive, hardened). Lint clean, build passes, browser harness 36/36 (incl. new T3 + B6 checks), node checks for the mirror owner logic. **B10 cannot be exercised in LOCAL_MODE** — worth one manual pass on the live site after deploy: sign out → sign back in → trips still there; Account → Sign out shows a spinner and no `pp2_*` keys remain in DevTools → Application → Local Storage.
 **Tier 4a — ✅ DONE (2026-09-03):** size guard, visible/retryable save failures, missing-doc guard, cloud-mode test rig.
 **Tier 4b — ✅ DONE (2026-09-03):** multi-device sync (Elizabeth confirmed she uses PackPal across devices). **Manual check after deploy:** open the app on phone + laptop, pack an item on one → it should appear packed on the other within a couple of seconds without a reload; pack different items on both at once → both end up packed on both.
-**Tier 4c — OPEN:** extract the SAFE leaf components from `PackPal.jsx` (run both harnesses after each extraction). Optional later: prune `weatherData.forecast` per trip to cut blob size (data-shape change → migration).
+**Tier 4c — ✅ DONE (2026-09-03):** leaf components extracted (see the structure section). **The audit is fully closed.** Optional later: extract `OutTheDoor` then `OutfitBuilder` one at a time with both harnesses after each; prune `weatherData.forecast` per trip to cut blob size (data-shape change → migration); index keys / inline hexes.
 
 Also outstanding: run `get_runtime_errors` on the Vercel project; commit + push this session's work.
 
