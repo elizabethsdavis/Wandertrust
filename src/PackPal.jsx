@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Search, Plus, Check, ChevronRight, Plane, Sparkles, ArrowLeft, X, AlertTriangle, Clock, PackageCheck, Zap, RotateCcw, Trash2, Copy, Award, TrendingUp, Brain, BarChart3, Timer, Shield, RefreshCw, Thermometer, Wind, CloudRain, Heart, Eye, Star, Loader, Shirt, Gem, Watch, Footprints, ShoppingBag, Palette, ChevronLeft, DoorOpen, Edit3, BatteryCharging } from "lucide-react";
 import { usePersist } from "./lib/store";
 import AccountBadge from "./components/Account";
+import TemplateEditor from "./components/TemplateEditor";
 import { C, F } from "./lib/theme";
 import { id, haptic } from "./lib/utils";
 import { fetchWeather } from "./lib/weather";
@@ -125,8 +126,8 @@ function useCelebration() {
 // genList, genTripOtd → ./lib/packing
 
 // ── Persist ──
-// usePersist now lives in ./lib/store — it transparently syncs to Supabase when
-// signed in, and falls back to localStorage (these same pp2_* keys) offline.
+// usePersist now lives in ./lib/store — it transparently syncs to Firebase
+// (Firestore) when signed in, and falls back to localStorage (these same pp2_* keys) offline.
 // Imported at the top of this file; the call sites below are unchanged.
 
 // ═══════════════════════════════════════════════════════
@@ -284,11 +285,14 @@ function PackItem({ item, onToggle, onRemove, readOnly, refillMode, onToggleRefi
 }
 
 function PackSection({ title, items, onToggle, onRemove, onAddItem, readOnly, refillMode, onToggleRefill, onToggleRefilled, chargeMode, onToggleCharge, onToggleCharged }) {
-  const [open, setOpen] = useState(true);
+  const [override, setOverride] = useState(null); // null = auto: collapse once complete
   const [adding, setAdding] = useState(false);
   const [nv, setNv] = useState("");
   const ref = useRef(null);
   const pk = items.filter(i => i.packed).length, tot = items.length, done = tot > 0 && pk === tot;
+  // Auto-collapse a completed section (tap the header to reopen). Always open in
+  // refill/charge modes, which need every item visible.
+  const open = override !== null ? override : ((refillMode || chargeMode) ? true : !done);
   useEffect(() => { if (adding && ref.current) ref.current.focus(); }, [adding]);
   const markMode = refillMode || chargeMode;
   const refillCount = refillMode ? items.filter(i => i.needsRefill).length : 0;
@@ -296,7 +300,7 @@ function PackSection({ title, items, onToggle, onRemove, onAddItem, readOnly, re
 
   return (
     <div style={{ marginBottom: 8 }}>
-      <div onClick={() => setOpen(!open)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px",
+      <div onClick={() => setOverride(!open)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px",
         cursor: "pointer", borderRadius: 12, transition: "background .15s" }}
         onMouseEnter={e => e.currentTarget.style.background = C.copperSubtle}
         onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
@@ -764,7 +768,7 @@ function FocusRefill({ items, onToggleRefill, onToggleRefilled, onExit }) {
                 <button onClick={() => onToggleRefilled(item.id)} style={{ width: 28, height: 28, borderRadius: 8,
                   display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
                   border: item.refilled ? "none" : `2px solid ${C.borderMedium}`,
-                  background: item.refilled ? `linear-gradient(135deg,${C.sage},${C.sageDeep})` : "transparent",
+                  background: item.refilled ? `linear-gradient(135deg,${C.sage},${C.sageDark})` : "transparent",
                   transition: "all .2s", flexShrink: 0 }}>
                   {item.refilled && <Check size={14} color="#fff" strokeWidth={3} />}
                 </button>
@@ -2472,6 +2476,8 @@ export default function PackPal() {
   const [customOccasions, setCustomOccasions] = usePersist("customOccasions", []);
   const [otdItems, setOtdItems] = usePersist("otdItems", DEFAULT_OTD_ITEMS);
   const [editGlobalOtd, setEditGlobalOtd] = useState(false);
+  const [catalogTemplate, setCatalogTemplate] = usePersist("catalogTemplate", null);
+  const [editTemplate, setEditTemplate] = useState(false);
 
   // Migration: move checkout category items into trip.otdItems and strip them from trip.items
   useEffect(() => {
@@ -2497,6 +2503,7 @@ export default function PackPal() {
   const [catFilter, setCatFilter] = useState(null);
   const [secFilter, setSecFilter] = useState(null);
   const [addingSec, setAddingSec] = useState(null); // category id we're adding a section to
+  const [catOverride, setCatOverride] = useState({}); // trip view: completed categories the user manually expanded, keyed `${tripId}:${catId}`
   const [newSecName, setNewSecName] = useState("");
   const newSecRef = useRef(null);
   const [histTrip, setHistTrip] = useState(null);
@@ -2523,7 +2530,7 @@ export default function PackPal() {
 
   // ── CRUD ──
   const createTrip = () => {
-    const items = genList(nTrip.tripType, nTrip.days);
+    const items = genList(nTrip.tripType, nTrip.days, catalogTemplate);
     const tripOtd = genTripOtd(otdItems, nTrip.tripType);
     const trip = { id: id(), ...nTrip, items, otdItems: tripOtd, otdChecked: {}, createdAt: new Date().toISOString(),
       icon: TRIP_TYPES.find(t => t.id === nTrip.tripType[0])?.icon || "✈️", weatherData };
@@ -3265,22 +3272,35 @@ export default function PackPal() {
           })()}
         </div>
 
-        {/* Items */}
-        <div style={{ padding: "8px 16px 100px" }}>
+        {/* Items — keyed by trip so per-section collapse state (PackSection) resets on a
+            direct trip→trip switch (e.g. Duplicate) instead of carrying over. */}
+        <div key={activeTrip.id} style={{ padding: "8px 16px 100px" }}>
           {CATEGORIES.map(cat => {
             const cs = grouped[cat.id]; if (!cs) return null;
             const ci = activeTrip.items.filter(i => i.category === cat.id);
             const cp = ci.filter(i => i.packed).length, allDone = cp === ci.length;
+            // Collapse a whole category once every item in it is packed (normal view only).
+            const catCollapsible = allDone && !refillMode && !chargeMode && !catFilter && !searchQ;
+            const catKey = `${activeTrip.id}:${cat.id}`; // per-trip: an expand in one trip must not leak into another
+            const catOpen = catCollapsible ? catOverride[catKey] === true : true;
             return (
               <div key={cat.id} style={{ marginBottom: 24 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 8px 4px" }}>
+                <div onClick={catCollapsible ? () => setCatOverride(o => ({ ...o, [catKey]: !catOpen })) : undefined}
+                  style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 8px 4px",
+                    cursor: catCollapsible ? "pointer" : "default" }}>
                   <span style={{ fontSize: 18 }}>{cat.icon}</span>
                   <span style={{ fontFamily: F.display, fontSize: 20, color: C.charcoal, fontWeight: 500 }}>{cat.label}</span>
                   <div style={{ flex: 1 }} />
                   <span style={{ fontFamily: F.body, fontSize: 12, fontWeight: 500, color: allDone ? C.sage : C.softGray }}>
                     {allDone ? "✓ Complete" : `${cp}/${ci.length}`}
                   </span>
+                  {catCollapsible && (
+                    <div style={{ transition: "transform .2s", transform: catOpen ? "rotate(90deg)" : "rotate(0)" }}>
+                      <ChevronRight size={16} color={C.softGray} />
+                    </div>
+                  )}
                 </div>
+                {catOpen && (
                 <div style={{ background: C.warmWhite, borderRadius: 16, border: `1px solid ${C.borderLight}`, padding: "4px 0" }}>
                   {Object.entries(cs).map(([sec, items]) => (
                     <PackSection key={sec} title={sec} items={items}
@@ -3319,6 +3339,7 @@ export default function PackPal() {
                     )
                   )}
                 </div>
+                )}
               </div>
             );
           })}
@@ -3390,6 +3411,11 @@ export default function PackPal() {
     return <GlobalOtdEditor items={otdItems} setItems={setOtdItems} onExit={() => setEditGlobalOtd(false)} />;
   }
 
+  // ═══ PACKING TEMPLATE EDITOR ═══
+  if (editTemplate) {
+    return <TemplateEditor template={catalogTemplate} setTemplate={setCatalogTemplate} onExit={() => setEditTemplate(false)} />;
+  }
+
   // ═══ HOME ═══
   return (
     <div style={{ minHeight: "100vh", background: C.cream }}>
@@ -3456,6 +3482,7 @@ export default function PackPal() {
             { label: "Insights", sub: "Patterns & tips", icon: <BarChart3 size={20} />, act: () => setView("insights"), col: C.sage },
             { label: "Freak Out Mode", sub: "ADHD support", icon: <Brain size={20} />, act: () => setFreakOut(true), col: C.lavender },
             { label: "Out the Door", sub: `${otdItems.length} default items`, icon: <DoorOpen size={20} />, act: () => setEditGlobalOtd(true), col: "#C17F59" },
+            { label: "Packing Template", sub: catalogTemplate ? "Customized" : "Default items", icon: <Edit3 size={20} />, act: () => setEditTemplate(true), col: C.sage },
             { label: "Quick Pack", sub: "Weekend getaway", icon: <Timer size={20} />, act: () => {
               setNTrip({ destination: "", tripType: ["city"], days: 3, weather: "warm", startDate: "", tempRange: "warm" });
               setView("new-trip");
