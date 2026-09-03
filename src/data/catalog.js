@@ -27,6 +27,24 @@ export const CORE = {
       { name: "Comfy compression socks", f: 0.85 },
       { name: "Skincare Masks", f: 0.8 },
     ],
+    "Smell Management": [
+      { name: "Laundry Bag", f: 0.9, e: true },
+      { name: "Tampons", f: 0.7 },
+      { name: "Panty liners", f: 0.5 },
+    ],
+    "Eyewear": [
+      { name: "Contacts (6+ pairs)", f: 0.95, e: true },
+      { name: "Glasses", f: 0.95, e: true },
+      { name: "Eyeglasses cleaner", f: 0.9 },
+    ],
+    "Hair Supplies": [
+      { name: "Satin Pillowcase", f: 0.95, e: true, ff: true },
+      { name: "Satin Bonnet", f: 0.9, e: true, ff: true },
+      { name: "Hair Stockings", f: 0.85, ff: true },
+      { name: "Hair Ties", f: 0.8, ff: true },
+    ],
+  },
+  health: {
     "Hydration": [
       { name: "Water Bottle", f: 0.95, e: true },
       { name: "Liquid IV", f: 0.95, e: true },
@@ -59,22 +77,6 @@ export const CORE = {
     "Hygiene & Immune": [
       { name: "Hand sanitizer spray", f: 0.9 },
       { name: "Tissue", f: 0.5 },
-    ],
-    "Smell Management": [
-      { name: "Laundry Bag", f: 0.9, e: true },
-      { name: "Tampons", f: 0.7 },
-      { name: "Panty liners", f: 0.5 },
-    ],
-    "Eyewear": [
-      { name: "Contacts (6+ pairs)", f: 0.95, e: true },
-      { name: "Glasses", f: 0.95, e: true },
-      { name: "Eyeglasses cleaner", f: 0.9 },
-    ],
-    "Hair Supplies": [
-      { name: "Satin Pillowcase", f: 0.95, e: true, ff: true },
-      { name: "Satin Bonnet", f: 0.9, e: true, ff: true },
-      { name: "Hair Stockings", f: 0.85, ff: true },
-      { name: "Hair Ties", f: 0.8, ff: true },
     ],
   },
   tech: {

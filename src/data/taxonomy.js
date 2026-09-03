@@ -27,6 +27,7 @@ export const CATEGORIES = [
   { id: "outfits", label: "Explore Outfits", icon: "👗", color: C.copper },
   { id: "activewear", label: "Active & Chill", icon: "💪🏾", color: "#7BA3C9" },
   { id: "necessities", label: "Travel Necessities", icon: "⚙️", color: C.sage },
+  { id: "health", label: "Health & Wellness", icon: "💊", color: "#C75B8A" },
   { id: "tech", label: "Technology", icon: "📱", color: "#8B7355" },
   { id: "toiletries", label: "Toiletries", icon: "🧴", color: "#C47EAA" },
   { id: "checkout", label: "Out the Door", icon: "🚪", color: C.danger },
