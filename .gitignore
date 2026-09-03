@@ -9,3 +9,8 @@ vite.config.js.timestamp-*
 .env
 .env.*
 !.env.example
+
+# Test-harness output (scripts/browser-checks.py, scripts/cloud-checks.py)
+dist-cloudsim
+shots
+cloud-fail.png
