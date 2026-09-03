@@ -60,9 +60,10 @@ function SortableSection({ section, category, open, onToggle, onReorderItems }) 
   );
 }
 
-export function ArrangeList({ items, onReorder, onDone }) {
+export function ArrangeList({ items, categories, onReorder, onDone }) {
+  const cats = categories || CATEGORIES;
   const groups = groupForArrange(items);
-  const order = CATEGORIES.map((c) => c.id);
+  const order = cats.map((c) => c.id);
   const sorted = [...groups].sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category));
   const [openSec, setOpenSec] = useState(null); // "cat|section" currently expanded
   const sensors = useDndSensors();
@@ -80,7 +81,7 @@ export function ArrangeList({ items, onReorder, onDone }) {
         </button>
       </div>
       {sorted.map((g) => {
-        const cat = CATEGORIES.find((c) => c.id === g.category);
+        const cat = cats.find((c) => c.id === g.category);
         const onDragEnd = ({ active, over }) => {
           if (!over || active.id === over.id) return;
           const name = String(active.id).split("|").slice(2).join("|");

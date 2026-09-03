@@ -1,13 +1,15 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { DndContext, closestCenter, MeasuringStrategy } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ArrowLeft, X, RotateCcw, Check, RefreshCw, BatteryCharging, WashingMachine } from "lucide-react";
+import { ArrowLeft, X, RotateCcw, Check, RefreshCw, BatteryCharging, WashingMachine, Pencil } from "lucide-react";
 import { C, F } from "../lib/theme";
 import { CATEGORIES } from "../data/taxonomy";
-import { templateBase, FLAGS, moveGroupSection, moveGroupItem } from "../lib/template";
+import { templateBase, FLAGS, moveGroupSection, moveGroupItem, renameGroupSection } from "../lib/template";
 import { addinsBase, defaultAddins, TYPE_KEYS, WEATHER_KEYS } from "../lib/addins";
+import { resolveCategories, isCategoryOverridden, setCategoryOverride, EMOJI_SUGGESTIONS } from "../lib/categories";
 import { useDndSensors, Grip } from "./dnd";
+import { EmojiPicker } from "./EmojiPicker";
 
 // ─────────────────────────────────────────────────────────────
 // Packing Template editor — two tabs.
@@ -22,8 +24,11 @@ import { useDndSensors, Grip } from "./dnd";
 // means the built-in COND_ITEMS. See lib/addins.js for the shape.
 //
 // Sections and items can be dragged into a new order (grip handles); the order
-// is simply the object-key / array order, which genList follows. Edits only
-// affect trips created afterwards.
+// is simply the object-key / array order, which genList follows. Sections can
+// be renamed in place. Category names and emojis are display overrides stored
+// under the additive `categoryMeta` key (lib/categories.js) — those apply
+// everywhere, existing trips included, since items reference category ids.
+// Everything else only affects trips created afterwards.
 // ─────────────────────────────────────────────────────────────
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
@@ -104,6 +109,13 @@ function ItemRow({ id, item, onRename, onToggleFlag, onRemove }) {
 function SectionBlock({ id, name, items, accent, onChange, newItem, collapsed }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   const sensors = useDndSensors();
+  const [nameDraft, setNameDraft] = useState(name);
+  useEffect(() => { setNameDraft(name); }, [name]);
+  const commitName = () => {
+    const v = nameDraft.trim();
+    if (!v || v === name) { setNameDraft(name); return; }
+    onChange((g) => renameGroupSection(g, name, v));
+  };
   const itemId = (i) => `${id}#${i}`;
   const onItemDragEnd = ({ active, over }) => {
     if (!over || active.id === over.id) return;
@@ -117,8 +129,13 @@ function SectionBlock({ id, name, items, accent, onChange, newItem, collapsed })
       boxShadow: isDragging ? `0 8px 24px ${C.shadowMed}` : "none", position: "relative", zIndex: isDragging ? 3 : 1 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 16px 2px 6px" }}>
         <Grip attributes={attributes} listeners={listeners} label={`Drag section ${name}`} size={28} />
-        <span style={{ flex: 1, fontFamily: F.body, fontSize: 11, fontWeight: 600, textTransform: "uppercase",
-          letterSpacing: ".08em", color: C.warmGray }}>{name}</span>
+        <input value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} onBlur={commitName}
+          onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") { setNameDraft(name); e.currentTarget.blur(); } }}
+          aria-label={`Section name ${name}`} title="Tap to rename this section"
+          style={{ flex: 1, minWidth: 0, fontFamily: F.body, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".08em",
+            color: C.warmGray, padding: "6px 8px", border: "1.5px solid transparent", borderRadius: 8, background: "transparent", outline: "none" }}
+          onFocus={(e) => { e.target.style.borderColor = C.borderMedium; e.target.style.background = C.cream; }}
+          onBlurCapture={(e) => { e.target.style.borderColor = "transparent"; e.target.style.background = "transparent"; }} />
         <span style={{ fontFamily: F.body, fontSize: 11, color: C.softGray }}>{items.length}</span>
       </div>
       {!collapsed && (<>
@@ -139,9 +156,18 @@ function SectionBlock({ id, name, items, accent, onChange, newItem, collapsed })
 }
 
 // A card for one group ({ section: [items] }): a template category or an add-in group.
-function GroupEditor({ gid, icon, title, hint, accent, group, onChange, newItem, emptyText }) {
+function GroupEditor({ gid, icon, title, hint, accent, group, onChange, newItem, emptyText, meta }) {
+  // meta (template categories only): { defaultLabel, defaultIcon, overridden, onLabel, onIcon, onReset }
   const sensors = useDndSensors();
   const [draggingSection, setDraggingSection] = useState(false);
+  const [labelDraft, setLabelDraft] = useState(title);
+  useEffect(() => { setLabelDraft(title); }, [title]);   // Reset / default buttons change the title from outside
+  const [pickingIcon, setPickingIcon] = useState(false);
+  const commitLabel = () => {
+    const v = labelDraft.trim();
+    if (!v) { setLabelDraft(title); return; }
+    if (v !== title) meta.onLabel(v);
+  };
   const names = Object.keys(group || {});
   const secId = (i) => `${gid}/${i}`;
   const onSectionDragEnd = ({ active, over }) => {
@@ -153,10 +179,41 @@ function GroupEditor({ gid, icon, title, hint, accent, group, onChange, newItem,
   };
   return (
     <div style={{ marginBottom: 22 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 10, padding: "10px 8px 6px" }}>
-        <span style={{ fontSize: 18 }}>{icon}</span>
-        <span style={{ fontFamily: F.display, fontSize: 20, color: C.charcoal, fontWeight: 500 }}>{title}</span>
-        {hint && <span style={{ fontFamily: F.body, fontSize: 12, color: C.softGray, flex: 1 }}>{hint}</span>}
+      {pickingIcon && meta && (
+        <EmojiPicker title="Category emoji" value={icon} defaultValue={meta.defaultIcon} suggestions={EMOJI_SUGGESTIONS.category}
+          onSave={(e) => meta.onIcon(e)} onClose={() => setPickingIcon(false)} />
+      )}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 8px 6px" }}>
+        {meta ? (
+          <>
+            <button onClick={() => setPickingIcon(true)} aria-label={`Change emoji for ${title}`} title="Change emoji"
+              style={{ width: 36, height: 36, borderRadius: 10, border: `1px solid ${C.borderLight}`, background: C.warmWhite, cursor: "pointer",
+                fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{icon}</button>
+            <input value={labelDraft} onChange={(e) => setLabelDraft(e.target.value)} onBlur={commitLabel}
+              onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") { setLabelDraft(title); e.currentTarget.blur(); } }}
+              aria-label={`Category name ${meta.defaultLabel}`} title="Tap to rename this category"
+              style={{ flex: 1, minWidth: 0, fontFamily: F.display, fontSize: 20, color: C.charcoal, fontWeight: 500, padding: "4px 8px",
+                border: "1.5px solid transparent", borderRadius: 8, background: "transparent", outline: "none" }}
+              onFocus={(e) => { e.target.style.borderColor = C.borderMedium; e.target.style.background = C.warmWhite; }}
+              onBlurCapture={(e) => { e.target.style.borderColor = "transparent"; e.target.style.background = "transparent"; }} />
+            {meta.overridden ? (
+              <button onClick={() => { meta.onReset(); setLabelDraft(meta.defaultLabel); }} aria-label={`Reset ${meta.defaultLabel} name and emoji`}
+                title={`Back to ${meta.defaultIcon} ${meta.defaultLabel}`}
+                style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", padding: 4,
+                  fontFamily: F.body, fontSize: 11, color: C.softGray }}>
+                <RotateCcw size={13} /> default
+              </button>
+            ) : (
+              <Pencil size={13} color={C.borderMedium} aria-hidden="true" />
+            )}
+          </>
+        ) : (
+          <>
+            <span style={{ fontSize: 18 }}>{icon}</span>
+            <span style={{ fontFamily: F.display, fontSize: 20, color: C.charcoal, fontWeight: 500 }}>{title}</span>
+            {hint && <span style={{ fontFamily: F.body, fontSize: 12, color: C.softGray, flex: 1 }}>{hint}</span>}
+          </>
+        )}
       </div>
       <div style={{ background: C.warmWhite, borderRadius: 16, border: `1px solid ${C.borderLight}`, padding: "6px 0" }}>
         {names.length === 0 && (
@@ -197,18 +254,26 @@ function SubHeading({ children }) {
   );
 }
 
-export default function TemplateEditor({ template, setTemplate, addins, setAddins, onExit }) {
+export default function TemplateEditor({ template, setTemplate, addins, setAddins, categoryMeta, setCategoryMeta, onExit }) {
   const [tab, setTab] = useState("items");
   const [draft, setDraft] = useState(() => {
     const base = template ? clone(template) : coreDraft();
     delete base.checkout;
-    return { template: base, addins: addinsBase(addins) };
+    return { template: base, addins: addinsBase(addins), categoryMeta: clone(categoryMeta || {}) };
   });
-  const [dirty, setDirty] = useState({ template: false, addins: false });
+  const [dirty, setDirty] = useState({ template: false, addins: false, categories: false });
   const [flash, setFlash] = useState(false);
-  const anyDirty = dirty.template || dirty.addins;
+  const anyDirty = dirty.template || dirty.addins || dirty.categories;
 
-  const editable = CATEGORIES.filter((c) => c.id !== "checkout");
+  const editable = resolveCategories(draft.categoryMeta).filter((c) => c.id !== "checkout");
+  const setCategory = (id, patch) => {
+    setDraft((prev) => ({ ...prev, categoryMeta: setCategoryOverride(prev.categoryMeta, id, patch) }));
+    setDirty((d) => ({ ...d, categories: true }));
+  };
+  const resetCategory = (id) => {
+    setDraft((prev) => { const m = { ...prev.categoryMeta }; delete m[id]; return { ...prev, categoryMeta: m }; });
+    setDirty((d) => ({ ...d, categories: true }));
+  };
 
   // Every edit is "replace this one group": template category, or add-in group.
   const setTemplateGroup = (catId, fn) => {
@@ -225,16 +290,18 @@ export default function TemplateEditor({ template, setTemplate, addins, setAddin
   const save = () => {
     if (dirty.template) setTemplate(draft.template);
     if (dirty.addins) setAddins(draft.addins);
-    setDirty({ template: false, addins: false });
+    if (dirty.categories) setCategoryMeta?.(draft.categoryMeta);
+    setDirty({ template: false, addins: false, categories: false });
     setFlash(true);
     setTimeout(() => setFlash(false), 1600);
   };
   const reset = () => {
-    if (!confirm("Reset the packing template and its add-ins back to the built-in defaults?")) return;
+    if (!confirm("Reset the packing template, its add-ins and the category names / emojis back to the built-in defaults?")) return;
     setTemplate(null);
     setAddins(null);
-    setDraft({ template: coreDraft(), addins: defaultAddins() });
-    setDirty({ template: false, addins: false });
+    setCategoryMeta?.({});
+    setDraft({ template: coreDraft(), addins: defaultAddins(), categoryMeta: {} });
+    setDirty({ template: false, addins: false, categories: false });
   };
 
   return (
@@ -266,16 +333,22 @@ export default function TemplateEditor({ template, setTemplate, addins, setAddin
             <p style={{ fontFamily: F.body, fontSize: 14, color: C.warmGray, marginTop: 6, lineHeight: 1.5 }}>
               Add, rename, or remove the items every <strong>new</strong> trip starts with, pre-mark what needs a
               refill, a charge, or a wash, and drag the grips to put sections and items in the order you pack them.
-              Changes only affect trips you create from now on — existing lists stay as they are.
+              Tap a section name to rename it, or a category name / emoji to change those. Item and section changes
+              only affect trips you create from now on; category names and emojis show everywhere right away.
               To pull a trip's edits back in here, open the trip and tap <strong>Save to template</strong>.
             </p>
           </div>
           <div style={{ padding: "8px 16px" }}>
-            {editable.map((cat) => (
-              <GroupEditor key={cat.id} gid={`t-${cat.id}`} icon={cat.icon} title={cat.label} accent={cat.color || C.copper}
-                group={draft.template[cat.id] || {}} onChange={(fn) => setTemplateGroup(cat.id, fn)} newItem={templateItem}
-                emptyText="No items yet — add a section below." />
-            ))}
+            {editable.map((cat) => {
+              const base = CATEGORIES.find((c) => c.id === cat.id);
+              return (
+                <GroupEditor key={cat.id} gid={`t-${cat.id}`} icon={cat.icon} title={cat.label} accent={cat.color || C.copper}
+                  group={draft.template[cat.id] || {}} onChange={(fn) => setTemplateGroup(cat.id, fn)} newItem={templateItem}
+                  emptyText="No items yet — add a section below."
+                  meta={{ defaultLabel: base.label, defaultIcon: base.icon, overridden: isCategoryOverridden(draft.categoryMeta, cat.id),
+                    onLabel: (v) => setCategory(cat.id, { label: v }), onIcon: (v) => setCategory(cat.id, { icon: v }), onReset: () => resetCategory(cat.id) }} />
+              );
+            })}
           </div>
         </>
       ) : (

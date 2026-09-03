@@ -6,7 +6,7 @@ import { HIST_TRIPS } from "../data/history";
 import { MiniBar } from "./ui";
 
 // ── Insights Component (Visual) ──
-export function Insights({ trips }) {
+export function Insights({ trips, categories }) {
   const total = trips.length + HIST_TRIPS.length;
   const avgItems = trips.length > 0 ? Math.round(trips.reduce((s, t) => s + (t.items?.length || 0), 0) / trips.length) : 0;
   const completed = trips.filter(t => { const p = (t.items || []).filter(i => i.packed).length; return p === (t.items || []).length && (t.items || []).length > 0; }).length;
@@ -69,7 +69,7 @@ export function Insights({ trips }) {
             <span style={{ fontFamily: F.body, fontSize: 13, fontWeight: 600, color: C.sage,
               textTransform: "uppercase", letterSpacing: ".05em" }}>Packing completion by category</span>
           </div>
-          {CATEGORIES.map(cat => {
+          {(categories || CATEGORIES).map(cat => {
             const s = catStats[cat.id];
             if (!s) return null;
             const pct = s.total > 0 ? Math.round(s.packed / s.total * 100) : 0;

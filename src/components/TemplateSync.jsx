@@ -10,9 +10,8 @@ import { CATEGORIES } from "../data/taxonomy";
 import { diffTripAgainstTemplate, applyTemplateChanges, FLAG_LABELS } from "../lib/template";
 
 const FLAG_ICON = { needsRefill: [RefreshCw, C.amber], needsCharge: [BatteryCharging, C.teal], needsWash: [WashingMachine, C.lavender] };
-const catLabel = (id) => CATEGORIES.find((c) => c.id === id)?.label || id;
 
-function Row({ entry, checked, onToggle, accent, Icon }) {
+function Row({ entry, checked, onToggle, accent, Icon, catLabel }) {
   return (
     <label style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", cursor: "pointer",
       borderBottom: `1px solid ${C.borderLight}` }}>
@@ -32,7 +31,9 @@ function Row({ entry, checked, onToggle, accent, Icon }) {
   );
 }
 
-export function TemplateSync({ trip, template, onApply, onExit }) {
+export function TemplateSync({ trip, template, categories, onApply, onExit }) {
+  const cats = categories || CATEGORIES;
+  const catLabel = (id) => cats.find((c) => c.id === id)?.label || id;
   const diff = useMemo(() => diffTripAgainstTemplate(trip, template), [trip, template]);
   // Additions and flags are pre-ticked; removals are opt-in (they change every future trip).
   const [selected, setSelected] = useState(() => new Set([...diff.added, ...diff.flagged].map((e) => e.id)));
@@ -58,7 +59,7 @@ export function TemplateSync({ trip, template, onApply, onExit }) {
         </button>
       </div>
       <div style={{ background: C.warmWhite, borderRadius: 16, border: `1px solid ${C.borderLight}`, overflow: "hidden" }}>
-        {entries.map((e) => <Row key={e.id} entry={e} checked={selected.has(e.id)} onToggle={() => toggle(e.id)} accent={accent} Icon={Icon} />)}
+        {entries.map((e) => <Row key={e.id} entry={e} checked={selected.has(e.id)} onToggle={() => toggle(e.id)} accent={accent} Icon={Icon} catLabel={catLabel} />)}
       </div>
     </div>
   );

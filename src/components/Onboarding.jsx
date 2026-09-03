@@ -39,6 +39,7 @@ export default function Onboarding() {
   const [, setCatalogTemplate] = usePersist("catalogTemplate", null);
   const [, setWardrobeMeta] = usePersist("wardrobeMeta", {});
   const [, setAddins] = usePersist("addins", null);
+  const [, setCategoryMeta] = usePersist("categoryMeta", {});
 
   const [importStarters, setImportStarters] = useState(false);
   const [bringLocal, setBringLocal] = useState(true);
@@ -67,6 +68,7 @@ export default function Onboarding() {
     const catalogTemplate = read("catalogTemplate", null);
     const wardrobeMeta = read("wardrobeMeta", {}) || {};
     const addins = read("addins", null);
+    const categoryMeta = read("categoryMeta", {}) || {};
     const completed = trips.filter(
       (t) => Array.isArray(t.items) && t.items.length > 0 && t.items.every((i) => i.packed)
     ).length;
@@ -78,6 +80,7 @@ export default function Onboarding() {
       catalogTemplate,
       wardrobeMeta,
       addins,
+      categoryMeta,
       completed,
       active: trips.length - completed,
       hasExtras:
@@ -114,6 +117,7 @@ export default function Onboarding() {
         if (localData.catalogTemplate) setCatalogTemplate(localData.catalogTemplate);
         if (Object.keys(localData.wardrobeMeta).length) setWardrobeMeta(localData.wardrobeMeta);
         if (localData.addins) setAddins(localData.addins);
+        if (Object.keys(localData.categoryMeta || {}).length) setCategoryMeta(localData.categoryMeta);
       }
       if (importStarters) merged.push(...buildStarterTrips());
       if (merged.length) setTrips(merged);
