@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { Search, Plus, Check, ChevronRight, Sparkles, ArrowLeft, X, Clock, Zap, RotateCcw, Trash2, Copy, Brain, BarChart3, Timer, Shield, RefreshCw, Thermometer, CloudRain, Eye, Star, Loader, Shirt, Gem, Watch, Footprints, ShoppingBag, Palette, ChevronLeft, DoorOpen, Edit3, BatteryCharging } from "lucide-react";
+import { Search, Plus, Check, ChevronRight, Sparkles, ArrowLeft, X, Clock, Zap, WashingMachine, ChevronsDownUp, ChevronsUpDown, Share2, GripVertical, Save, RotateCcw, Trash2, Copy, Brain, BarChart3, Timer, Shield, RefreshCw, Thermometer, CloudRain, Eye, Star, Loader, Shirt, Gem, Watch, Footprints, ShoppingBag, Palette, ChevronLeft, DoorOpen, Edit3, BatteryCharging } from "lucide-react";
 import { usePersist, useStoreMeta } from "./lib/store";
 import AccountBadge from "./components/Account";
 import TemplateEditor from "./components/TemplateEditor";
@@ -16,7 +16,15 @@ import { FreakOutMode } from "./components/FreakOutMode";
 import { GuidedPack } from "./components/GuidedPack";
 import { FocusRefill } from "./components/FocusRefill";
 import { FocusCharge } from "./components/FocusCharge";
+import { FocusLaundry } from "./components/FocusLaundry";
+import { ShareSheet } from "./components/ShareSheet";
+import { TemplateSync } from "./components/TemplateSync";
+import { ArrangeList } from "./components/ArrangeList";
+import { tripToMarkdown, markdownFileName } from "./lib/exportList";
+import { parseItemMeta, swatchBackground } from "./lib/wardrobe";
+import { WardrobeMetaPicker } from "./components/WardrobeMetaPicker";
 import { DEFAULT_OTD_ITEMS } from "./data/otdDefaults";
+import { migrateTrip, migrateTemplate, slotToSection } from "./lib/migrations";
 import { GlobalOtdEditor } from "./components/GlobalOtdEditor";
 import { SmartRecsView } from "./components/SmartRecsView";
 import { Insights } from "./components/Insights";
@@ -341,50 +349,41 @@ const OCCASION_TYPES = [
   { id: "special", label: "Special Event", icon: "✨" },
 ];
 
-function parseItemMeta(name) {
-  const lower = name.toLowerCase();
-  const colors = ["black", "white", "cream", "gold", "pink", "blue", "navy", "brown", "tan", "turquoise", "lavender", "green", "red", "rose gold", "silver", "fawn", "sparkly"];
-  const brands = ["zevelyn", "diarrablu", "longchamp", "doc marten", "gucci", "fenty", "nike", "ugg", "birkenstock", "away", "heattech"];
-  const foundColor = colors.find(c => lower.includes(c)) || null;
-  const foundBrand = brands.find(b => lower.includes(b)) || null;
-  return { color: foundColor, brand: foundBrand };
-}
-
-function colorToHex(name) {
-  const map = { black: "#2D2926", white: "#F5F0EB", cream: "#F5EDE0", gold: "#D4A04A", pink: "#D4889A", blue: "#7BA3C9",
-    navy: "#3B5175", brown: "#8B7355", tan: "#C4A882", turquoise: "#4EADC5", lavender: "#9B8EC4", green: "#8BA888",
-    red: "#C75B5B", "rose gold": "#C9A08B", silver: "#A8A8A8", fawn: "#C4A882", sparkly: "#D4A04A" };
-  return map[name] || C.copperLight;
-}
-
-function WardrobeCarousel({ slotId, wardrobe, onSelect, selected, onRemoveItem }) {
+function WardrobeCarousel({ slotId, wardrobe, wardrobeMeta, onSetMeta, onSelect, selected, onRemoveItem }) {
   const items = (wardrobe[slotId] || []);
   const scrollRef = useRef(null);
+  const [fixing, setFixing] = useState(null); // item name whose colour/brand is being corrected
   // selected can be a string (single) or array (multi)
   const selArr = Array.isArray(selected) ? selected : selected ? [selected] : [];
+  const metaFor = (item) => parseItemMeta(item, wardrobeMeta?.[item]);
 
-  // Group by color for visual organization
+  // Group by colour family for visual organization
   const grouped = useMemo(() => {
     const colorMap = {};
     items.forEach(item => {
-      const meta = parseItemMeta(item);
+      const meta = parseItemMeta(item, wardrobeMeta?.[item]);
       const key = meta.color || "other";
       if (!colorMap[key]) colorMap[key] = [];
       colorMap[key].push(item);
     });
     return Object.entries(colorMap).sort((a, b) => b[1].length - a[1].length);
-  }, [items]);
+  }, [items, wardrobeMeta]);
 
   const allItems = grouped.flatMap(([, items]) => items);
 
   return (
     <div>
+      {fixing && (
+        <WardrobeMetaPicker name={fixing} meta={wardrobeMeta?.[fixing]} onClose={() => setFixing(null)}
+          onSave={(patch) => onSetMeta?.(fixing, patch)} />
+      )}
       {allItems.length > 0 && (
         <div ref={scrollRef} style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 8,
           scrollBehavior: "smooth", WebkitOverflowScrolling: "touch" }}>
           {allItems.map((item, i) => {
-            const meta = parseItemMeta(item);
+            const meta = metaFor(item);
             const isSel = selArr.includes(item);
+            const swatch = swatchBackground(meta);
             return (
               <div key={`${item}-${i}`} style={{ position: "relative", flexShrink: 0 }}>
                 <button onClick={() => onSelect(item)}
@@ -394,12 +393,23 @@ function WardrobeCarousel({ slotId, wardrobe, onSelect, selected, onRemoveItem }
                     cursor: "pointer", textAlign: "left", transition: "all .2s",
                     transform: isSel ? "scale(1.02)" : "scale(1)",
                     boxShadow: isSel ? `0 4px 16px rgba(193,127,89,.2)` : `0 1px 4px ${C.shadow}` }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                    {meta.color && <div style={{ width: 10, height: 10, borderRadius: 5,
-                      background: colorToHex(meta.color), border: meta.color === "white" ? `1px solid ${C.borderLight}` : "none" }} />}
+                  {/* Colour / brand / pattern row — tap to correct */}
+                  <span role="button" tabIndex={0} title="Tap to fix the colour or brand"
+                    onClick={(e) => { e.stopPropagation(); setFixing(item); }}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); setFixing(item); } }}
+                    style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, minHeight: 14, cursor: "pointer" }}>
+                    {swatch ? (
+                      <span style={{ width: 12, height: 12, borderRadius: 6, background: swatch, flexShrink: 0,
+                        border: `1px solid ${meta.color === "white" || meta.color === "cream" ? C.borderMedium : "rgba(45,41,38,.12)"}`,
+                        outline: meta.source.color === "manual" ? `2px solid ${C.copperGlow}` : "none" }} />
+                    ) : (
+                      <span style={{ width: 12, height: 12, borderRadius: 6, flexShrink: 0, border: `1px dashed ${C.borderMedium}` }} />
+                    )}
                     {meta.brand && <span style={{ fontFamily: F.body, fontSize: 9, fontWeight: 600, textTransform: "uppercase",
-                      letterSpacing: ".05em", color: C.softGray }}>{meta.brand}</span>}
-                  </div>
+                      letterSpacing: ".05em", color: C.softGray, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{meta.brand}</span>}
+                    {meta.pattern && <span style={{ fontFamily: F.body, fontSize: 9, fontWeight: 600, textTransform: "uppercase",
+                      letterSpacing: ".05em", color: C.copper, background: C.copperSubtle, padding: "1px 5px", borderRadius: 4 }}>{meta.pattern}</span>}
+                  </span>
                   <div style={{ fontFamily: F.body, fontSize: 13, fontWeight: isSel ? 600 : 400,
                     color: C.charcoal, lineHeight: 1.3,
                     overflow: "hidden", textOverflow: "ellipsis",
@@ -433,13 +443,6 @@ function WardrobeCarousel({ slotId, wardrobe, onSelect, selected, onRemoveItem }
   );
 }
 
-function slotToSection(slotId) {
-  return slotId === "shoes" ? "Shoes" : slotId === "bag" ? "Bags & Purses" :
-    slotId === "necklace" || slotId === "bracelet" ? "Jewelry" :
-    slotId === "eyewear" ? "Eyewear" : slotId === "hair" ? "Hair Accessories" :
-    slotId === "layer" ? "Outerwear" : "Clothing";
-}
-
 function collectUniqueOutfitItems(occasions) {
   const uniqueItems = new Map();
   occasions.forEach((dayOccs) => {
@@ -464,7 +467,7 @@ const OCCASION_EMOJIS = [
   "🍕","🍷","🎤","🪩","🌅","🌃","❄️","🔥","🦋","🌺","🌈","💎","🪷","🫧"
 ];
 
-function OutfitBuilder({ trip, wardrobe, setWardrobe, customOccasions, setCustomOccasions, onSave, onExit, celebrate }) {
+function OutfitBuilder({ trip, wardrobe, setWardrobe, wardrobeMeta, setWardrobeMeta, customOccasions, setCustomOccasions, onSave, onExit, celebrate }) {
   // Merge default + custom occasion types
   const allOccasionTypes = useMemo(() => [...OCCASION_TYPES, ...customOccasions], [customOccasions]);
 
@@ -1179,7 +1182,8 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, customOccasions, setCustom
               Your wardrobe
             </div>
           )}
-          <WardrobeCarousel slotId={currentSlot.id} wardrobe={wardrobe}
+          <WardrobeCarousel slotId={currentSlot.id} wardrobe={wardrobe} wardrobeMeta={wardrobeMeta}
+            onSetMeta={(name, patch) => setWardrobeMeta(prev => { const next = { ...(prev || {}) }; if (patch) next[name] = patch; else delete next[name]; return next; })}
             onSelect={(item) => setSlotValue(item, true)} selected={selectedValue}
             onRemoveItem={(item) => setWardrobe(prev => ({ ...prev, [currentSlot.id]: (prev[currentSlot.id] || []).filter(i => i !== item) }))} />
         </div>
@@ -1277,15 +1281,22 @@ export default function PackPal() {
   const [focusRefill, setFocusRefill] = useState(false);
   const [chargeMode, setChargeMode] = useState(false);
   const [focusCharge, setFocusCharge] = useState(false);
+  const [washMode, setWashMode] = useState(false);
+  const [focusLaundry, setFocusLaundry] = useState(false);
+  const [sectionsForce, setSectionsForce] = useState(null); // { open: bool, seq } from the Collapse all / Expand all control
+  const [shareOpen, setShareOpen] = useState(false);
+  const [templateSync, setTemplateSync] = useState(false);
+  const [arrangeMode, setArrangeMode] = useState(false);
   const [wardrobe, setWardrobe] = usePersist("wardrobe", {});
+  const [wardrobeMeta, setWardrobeMeta] = usePersist("wardrobeMeta", {}); // { [itemName]: { color?, brand? } } corrections (additive key)
   const [customOccasions, setCustomOccasions] = usePersist("customOccasions", []);
   const [otdItems, setOtdItems] = usePersist("otdItems", DEFAULT_OTD_ITEMS);
   const [editGlobalOtd, setEditGlobalOtd] = useState(false);
   const [catalogTemplate, setCatalogTemplate] = usePersist("catalogTemplate", null);
   const [editTemplate, setEditTemplate] = useState(false);
 
-  // Migration: move checkout category items into trip.otdItems and strip them from trip.items.
-  // Idempotent: it only writes when a trip still has checkout items or lacks otdItems.
+  // Migrations (see ./lib/migrations): checkout → OTD, Health & Wellness relabel,
+  // Clothing → Tops/Bottoms. Idempotent: only writes when something actually changes.
   // Timing (audit B6): StoreProvider renders a splash until the cloud blob has loaded, so
   // this component never mounts with stale/empty `trips`; the `ready` gate makes that
   // invariant explicit instead of relying on the splash.
@@ -1294,20 +1305,13 @@ export default function PackPal() {
     if (!storeReady) return;
     let changed = false;
     const migrated = trips.map(t => {
-      const checkoutItems = (t.items || []).filter(i => i.category === "checkout");
-      if (checkoutItems.length === 0 && t.otdItems) return t;
-      changed = true;
-      const existing = t.otdItems || otdItems.map(i => ({ ...i }));
-      const nameSet = new Set(existing.map(i => i.name.toLowerCase()));
-      checkoutItems.forEach(ci => {
-        if (!nameSet.has(ci.name.toLowerCase())) {
-          existing.push({ name: ci.name, emoji: "📌" });
-          nameSet.add(ci.name.toLowerCase());
-        }
-      });
-      return { ...t, items: (t.items || []).filter(i => i.category !== "checkout"), otdItems: existing, otdChecked: t.otdChecked || {} };
+      const r = migrateTrip(t, otdItems);
+      if (r.changed) changed = true;
+      return r.trip;
     });
     if (changed) setTrips(migrated);
+    const tr = migrateTemplate(catalogTemplate);
+    if (tr.changed) setCatalogTemplate(tr.template);
   }, [storeReady]);
 
   const [searchQ, setSearchQ] = useState("");
@@ -1413,6 +1417,29 @@ export default function PackPal() {
       }, 50);
     }
   };
+  const reorderItems = (tid, nextItems) => {
+    setTrips(p => p.map(t => t.id === tid ? { ...t, items: nextItems } : t));
+  };
+  const toggleWash = (tid, iid) => {
+    haptic("light");
+    setTrips(p => p.map(t => t.id === tid ? { ...t, items: t.items.map(i => i.id === iid ? { ...i, needsWash: !i.needsWash } : i) } : t));
+  };
+  const toggleWashed = (tid, iid) => {
+    const trip = trips.find(t => t.id === tid);
+    const item = trip?.items.find(i => i.id === iid);
+    const wasWashed = item?.washed;
+    haptic("success");
+    setTrips(p => p.map(t => t.id === tid ? { ...t, items: t.items.map(i => i.id === iid ? { ...i, washed: !i.washed } : i) } : t));
+    if (!wasWashed && item) {
+      setTimeout(() => {
+        const t = trips.find(tr => tr.id === tid);
+        if (!t) return;
+        const updated = t.items.map(i => i.id === iid ? { ...i, washed: true } : i);
+        const washItems = updated.filter(i => i.needsWash);
+        if (washItems.length > 0 && washItems.every(i => i.washed)) celebrate("allWashed", "medium");
+      }, 50);
+    }
+  };
   const addItem = (tid, sec, cat, name) => {
     const ni = { id: id(), name, section: sec, category: cat, packed: false, essential: false, ff: false, freq: 0, needsRefill: false, needsCharge: false };
     setTrips(p => p.map(t => t.id === tid ? { ...t, items: [...t.items, ni] } : t));
@@ -1483,6 +1510,7 @@ export default function PackPal() {
     return <><GuidedPack items={activeTrip.items} onToggle={iid => toggle(activeTrip.id, iid)}
       onToggleRefilled={iid => toggleRefilled(activeTrip.id, iid)}
       onToggleCharged={iid => toggleCharged(activeTrip.id, iid)}
+      onToggleWashed={iid => toggleWashed(activeTrip.id, iid)}
       onRemove={iid => removeItem(activeTrip.id, iid)}
       onExit={() => setGuidedMode(false)} tripName={activeTrip.destination} /><CelebrationLayer /></>;
   }
@@ -1503,6 +1531,20 @@ export default function PackPal() {
       onExit={() => setFocusCharge(false)} tripName={activeTrip.destination} /><CelebrationLayer /></>;
   }
 
+  // ═══ SAVE TO TEMPLATE ═══
+  if (templateSync && activeTrip) {
+    return <TemplateSync trip={activeTrip} template={catalogTemplate}
+      onApply={(next) => setCatalogTemplate(next)} onExit={() => setTemplateSync(false)} />;
+  }
+
+  // ═══ FOCUS LAUNDRY ═══
+  if (focusLaundry && activeTrip) {
+    return <><FocusLaundry items={activeTrip.items}
+      onToggleWash={iid => toggleWash(activeTrip.id, iid)}
+      onToggleWashed={iid => toggleWashed(activeTrip.id, iid)}
+      onExit={() => setFocusLaundry(false)} tripName={activeTrip.destination} /><CelebrationLayer /></>;
+  }
+
   // ═══ SMART RECS ═══
   if (showRecs && activeTrip) {
     return <SmartRecsView tripTypes={activeTrip.tripType} tempRange={activeTrip.tempRange}
@@ -1511,7 +1553,7 @@ export default function PackPal() {
 
   // ═══ OUTFIT BUILDER ═══
   if (outfitMode && activeTrip) {
-    return <><OutfitBuilder trip={activeTrip} wardrobe={wardrobe} setWardrobe={setWardrobe}
+    return <><OutfitBuilder trip={activeTrip} wardrobe={wardrobe} setWardrobe={setWardrobe} wardrobeMeta={wardrobeMeta} setWardrobeMeta={setWardrobeMeta}
       customOccasions={customOccasions} setCustomOccasions={setCustomOccasions}
       celebrate={celebrate}
       onExit={() => setOutfitMode(false)}
@@ -1837,9 +1879,16 @@ export default function PackPal() {
     const chargeItemCount = activeTrip.items.filter(i => i.needsCharge).length;
     const chargedCount = activeTrip.items.filter(i => i.needsCharge && i.charged).length;
     const chargePending = chargeItemCount - chargedCount;
+    const washItemCount = activeTrip.items.filter(i => i.needsWash).length;
+    const washedCount = activeTrip.items.filter(i => i.needsWash && i.washed).length;
+    const washPending = washItemCount - washedCount;
 
     return (<>
       <CelebrationLayer />
+      {shareOpen && (
+        <ShareSheet text={tripToMarkdown(activeTrip, { otdItems })} filename={markdownFileName(activeTrip)}
+          title={`${activeTrip.destination} — packing list`} onClose={() => setShareOpen(false)} />
+      )}
       <div style={{ minHeight: "100vh", background: C.cream }}>
         {/* Header */}
         <div style={{ background: `linear-gradient(135deg,${C.warmWhite},${C.cream})`, padding: "20px 24px 24px",
@@ -1884,6 +1933,9 @@ export default function PackPal() {
           <div style={{ display: "flex", gap: 6, marginTop: 12, overflowX: "auto", paddingBottom: 2 }}>
             {[
               { label: "Out the Door", icon: <DoorOpen size={14} />, action: () => setOutTheDoor(true), color: C.copper },
+              { label: "Share", icon: <Share2 size={14} />, action: () => setShareOpen(true), color: C.copper },
+              { label: "Save to template", icon: <Save size={14} />, action: () => setTemplateSync(true), color: C.sage },
+              { label: arrangeMode ? "Done arranging" : "Arrange", icon: <GripVertical size={14} />, action: () => setArrangeMode(a => !a), color: arrangeMode ? C.sage : C.copper },
               { label: "Smart Recs", icon: <Sparkles size={14} />, action: () => setShowRecs(true), color: C.copper },
               { label: "Freak Out", icon: <Brain size={14} />, action: () => setFreakOut(true), color: C.copper },
               { label: "Reset", icon: <RotateCcw size={13} />, action: () => {
@@ -1904,6 +1956,7 @@ export default function PackPal() {
           {(() => {
             const hasRefills = refillCount > 0;
             const hasCharges = chargeItemCount > 0;
+            const hasWashes = washItemCount > 0;
             // Refill & Charge are always available: entering "mark" mode is how
             // items get flagged in the first place, so it must never be gated.
             return (
@@ -1912,7 +1965,7 @@ export default function PackPal() {
                   letterSpacing: ".1em", color: C.softGray, marginBottom: 8, paddingLeft: 2 }}>Trip Prep</div>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   {/* Refill toggle */}
-                  <button onClick={() => { setRefillMode(!refillMode); setChargeMode(false); }}
+                  <button onClick={() => { setRefillMode(!refillMode); setChargeMode(false); setWashMode(false); }}
                     style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", borderRadius: 10,
                       cursor: "pointer", fontFamily: F.body, fontSize: 12, fontWeight: 500, transition: "all .15s",
                       background: refillMode ? `linear-gradient(135deg,${C.amber},#E8B84A)` : C.warmWhite,
@@ -1923,7 +1976,7 @@ export default function PackPal() {
                     {refillMode ? `Done (${refillCount})` : hasRefills ? `Refills ${refilledCount}/${refillCount}` : "Mark Refills"}
                   </button>
                   {/* Focus Refill */}
-                  {hasRefills && !refillMode && !chargeMode && (
+                  {hasRefills && !refillMode && !chargeMode && !washMode && (
                     <button onClick={() => setFocusRefill(true)}
                       style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", borderRadius: 10,
                         cursor: "pointer", fontFamily: F.body, fontSize: 12, fontWeight: 500,
@@ -1932,7 +1985,7 @@ export default function PackPal() {
                     </button>
                   )}
                   {/* Charge toggle */}
-                  <button onClick={() => { setChargeMode(!chargeMode); setRefillMode(false); }}
+                  <button onClick={() => { setChargeMode(!chargeMode); setRefillMode(false); setWashMode(false); }}
                     style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", borderRadius: 10,
                       cursor: "pointer", fontFamily: F.body, fontSize: 12, fontWeight: 500, transition: "all .15s",
                       background: chargeMode ? `linear-gradient(135deg,${C.teal},#6BC4D8)` : C.warmWhite,
@@ -1943,12 +1996,32 @@ export default function PackPal() {
                     {chargeMode ? `Done (${chargeItemCount})` : hasCharges ? `Charges ${chargedCount}/${chargeItemCount}` : "Mark Charges"}
                   </button>
                   {/* Focus Charge */}
-                  {hasCharges && !chargeMode && !refillMode && (
+                  {hasCharges && !chargeMode && !refillMode && !washMode && (
                     <button onClick={() => setFocusCharge(true)}
                       style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", borderRadius: 10,
                         cursor: "pointer", fontFamily: F.body, fontSize: 12, fontWeight: 500,
                         background: C.tealGlow, color: C.teal, border: "1px solid rgba(78,173,197,.2)", transition: "all .15s" }}>
                       <Zap size={12} /> Focus{chargePending > 0 ? ` (${chargePending})` : ""}
+                    </button>
+                  )}
+                  {/* Laundry toggle */}
+                  <button onClick={() => { setWashMode(!washMode); setRefillMode(false); setChargeMode(false); }}
+                    style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", borderRadius: 10,
+                      cursor: "pointer", fontFamily: F.body, fontSize: 12, fontWeight: 500, transition: "all .15s",
+                      background: washMode ? `linear-gradient(135deg,${C.lavender},#B8A8D8)` : C.warmWhite,
+                      color: washMode ? "#fff" : hasWashes ? C.lavender : C.warmGray,
+                      border: `1px solid ${washMode ? "transparent" : hasWashes ? "rgba(155,142,196,.3)" : C.borderLight}`,
+                      boxShadow: washMode ? "0 2px 8px rgba(155,142,196,.3)" : "none" }}>
+                    <WashingMachine size={13} />
+                    {washMode ? `Done (${washItemCount})` : hasWashes ? `Laundry ${washedCount}/${washItemCount}` : "Mark Laundry"}
+                  </button>
+                  {/* Focus Laundry */}
+                  {hasWashes && !washMode && !refillMode && !chargeMode && (
+                    <button onClick={() => setFocusLaundry(true)}
+                      style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", borderRadius: 10,
+                        cursor: "pointer", fontFamily: F.body, fontSize: 12, fontWeight: 500,
+                        background: C.lavenderGlow, color: C.lavender, border: "1px solid rgba(155,142,196,.2)", transition: "all .15s" }}>
+                      <Zap size={12} /> Focus{washPending > 0 ? ` (${washPending})` : ""}
                     </button>
                   )}
                 </div>
@@ -1975,18 +2048,41 @@ export default function PackPal() {
               </span>
             </div>
           )}
+          {washMode && (
+            <div style={{ marginTop: 12, background: C.lavenderGlow, borderRadius: 12, padding: "10px 16px",
+              display: "flex", alignItems: "center", gap: 8, border: `1px solid rgba(155,142,196,.15)` }}>
+              <WashingMachine size={14} color={C.lavender} />
+              <span style={{ fontFamily: F.body, fontSize: 13, color: C.lavender }}>
+                Tap clothes that need a wash before you pack them
+              </span>
+            </div>
+          )}
         </div>
 
+        {arrangeMode ? (
+          <ArrangeList items={activeTrip.items} onReorder={(next) => reorderItems(activeTrip.id, next)} onDone={() => setArrangeMode(false)} />
+        ) : (<>
         {/* Search & Filter */}
         <div style={{ padding: "16px 24px 8px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px",
-            background: C.warmWhite, borderRadius: 14, border: `1px solid ${C.borderLight}` }}>
-            <Search size={16} color={C.softGray} />
-            <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search items..."
-              style={{ flex: 1, border: "none", background: "none", outline: "none",
-                fontFamily: F.body, fontSize: 14, color: C.charcoal }} />
-            {searchQ && <button onClick={() => setSearchQ("")} style={{ background: "none", border: "none", cursor: "pointer", padding: 2 }}>
-              <X size={14} color={C.softGray} /></button>}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 10, padding: "10px 16px",
+              background: C.warmWhite, borderRadius: 14, border: `1px solid ${C.borderLight}` }}>
+              <Search size={16} color={C.softGray} />
+              <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search items..."
+                style={{ flex: 1, minWidth: 0, border: "none", background: "none", outline: "none",
+                  fontFamily: F.body, fontSize: 14, color: C.charcoal }} />
+              {searchQ && <button onClick={() => setSearchQ("")} style={{ background: "none", border: "none", cursor: "pointer", padding: 2 }}>
+                <X size={14} color={C.softGray} /></button>}
+            </div>
+            {/* Collapse all / Expand all — sections only (categories keep their own fold) */}
+            <button onClick={() => setSectionsForce(f => ({ open: f ? !f.open : false, seq: (f?.seq || 0) + 1 }))}
+              title={sectionsForce && !sectionsForce.open ? "Expand all sections" : "Collapse all sections"}
+              style={{ display: "flex", alignItems: "center", gap: 5, padding: "10px 12px", borderRadius: 14, flexShrink: 0,
+                background: C.warmWhite, border: `1px solid ${C.borderLight}`, cursor: "pointer",
+                fontFamily: F.body, fontSize: 12, fontWeight: 500, color: C.warmGray }}>
+              {sectionsForce && !sectionsForce.open ? <ChevronsUpDown size={15} /> : <ChevronsDownUp size={15} />}
+              {sectionsForce && !sectionsForce.open ? "Expand" : "Collapse"}
+            </button>
           </div>
           <div style={{ display: "flex", gap: 6, marginTop: 12, overflowX: "auto", paddingBottom: 4 }}>
             <button onClick={() => { setCatFilter(null); setSecFilter(null); }} style={{ padding: "6px 14px", borderRadius: 10, whiteSpace: "nowrap",
@@ -2080,7 +2176,7 @@ export default function PackPal() {
             const ci = activeTrip.items.filter(i => i.category === cat.id);
             const cp = ci.filter(i => i.packed).length, allDone = cp === ci.length;
             // Collapse a whole category once every item in it is packed (normal view only).
-            const catCollapsible = allDone && !refillMode && !chargeMode && !catFilter && !searchQ;
+            const catCollapsible = allDone && !refillMode && !chargeMode && !washMode && !catFilter && !searchQ;
             const catKey = `${activeTrip.id}:${cat.id}`; // per-trip: an expand in one trip must not leak into another
             const catOpen = catCollapsible ? catOverride[catKey] === true : true;
             return (
@@ -2111,9 +2207,13 @@ export default function PackPal() {
                       onToggleRefilled={iid => toggleRefilled(activeTrip.id, iid)}
                       chargeMode={chargeMode}
                       onToggleCharge={iid => toggleCharge(activeTrip.id, iid)}
-                      onToggleCharged={iid => toggleCharged(activeTrip.id, iid)} />
+                      onToggleCharged={iid => toggleCharged(activeTrip.id, iid)}
+                      washMode={washMode}
+                      onToggleWash={iid => toggleWash(activeTrip.id, iid)}
+                      onToggleWashed={iid => toggleWashed(activeTrip.id, iid)}
+                      forceOpen={sectionsForce} />
                   ))}
-                  {!refillMode && !chargeMode && (
+                  {!refillMode && !chargeMode && !washMode && (
                     addingSec === cat.id && !catFilter ? (
                       <form onSubmit={e => { e.preventDefault(); addSection(cat.id, newSecName); }}
                         style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px" }}>
@@ -2144,6 +2244,7 @@ export default function PackPal() {
             );
           })}
         </div>
+        </>)}
       </div>
     </>);
   }
