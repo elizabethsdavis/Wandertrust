@@ -446,6 +446,133 @@ with sync_playwright() as p:
     page.get_by_role("button", name="Focus Pack").wait_for()
     page.screenshot(path=f"{SHOTS}/10-ux-trip-view.png")
 
+    # ══════════════════════════════════════════════════════════════════════
+    # Home Screen batch (2026-09-03): app icon + manifest, reload button, update
+    # banner, template editor drag-and-drop + add-ins, past-trip lock.
+    # ══════════════════════════════════════════════════════════════════════
+    page.evaluate("() => localStorage.clear()")
+    page.reload(); page.get_by_role("button", name="New Trip").wait_for()
+
+    # ── P1: icons + manifest are linked and served ──
+    r = page.request.get(BASE + "/apple-touch-icon.png"); man = page.request.get(BASE + "/manifest.webmanifest")
+    html = page.content()
+    ok(r.status == 200 and r.headers.get("content-type", "").startswith("image/png") and len(r.body()) > 1000, "P1 /apple-touch-icon.png is served as a PNG")
+    mj = man.json() if man.status == 200 else {}
+    ok(man.status == 200 and mj.get("display") == "standalone" and any(i.get("sizes") == "512x512" for i in mj.get("icons", [])), "P1 manifest: standalone display, 512px icon")
+    ok('rel="apple-touch-icon"' in html and 'rel="manifest"' in html and 'apple-mobile-web-app-title' in html, "P1 index.html links the touch icon, manifest and app title")
+    served = {f: page.request.get(BASE + f).status for f in ["/favicon.svg", "/icon-192.png", "/icon-512.png", "/favicon-32.png", "/version.json"]}
+    ok(all(v == 200 for v in served.values()), f"P1 favicon / manifest icons / version.json all served ({served})")
+    ver = page.request.get(BASE + "/version.json").json()
+    ok(page.get_by_role("button", name="Account").click() is None and page.get_by_text(f"Version {ver['version']}").count() == 1, f"P3 Account sheet shows the build version ({ver['version']})")
+    ok(page.get_by_role("button", name="Reload app").count() == 2, "P3 'Reload app' in the Account sheet (plus the Home header button)")
+    page.mouse.click(10, 10); page.wait_for_timeout(300)   # backdrop closes the sheet
+    ok(page.get_by_role("button", name="Reload app").count() == 1, "P3 sheet closed")
+
+    # ── P2: header reload really reloads ──
+    page.evaluate("() => { window.__pp_marker = 1; }")
+    page.get_by_role("button", name="Reload app").click()
+    page.get_by_role("button", name="New Trip").wait_for(); page.wait_for_timeout(300)
+    ok(page.evaluate("() => window.__pp_marker") is None, "P2 Home header 'Reload app' reloads the page")
+
+    # ── P4: a newer deploy shows the banner; Reload / Not now ──
+    page.route("**/version.json*", lambda route: route.fulfill(status=200, content_type="application/json", body='{"version":"deadbee","builtAt":"2030-01-01T00:00:00.000Z"}'))
+    page.reload(); page.get_by_role("button", name="New Trip").wait_for()
+    page.get_by_text("A newer version of PackPal is ready.").wait_for(timeout=9000)
+    ok(True, "P4 update banner appears once version.json reports a newer build (checked ~4 s after load)")
+    page.get_by_role("button", name="Not now").click(); page.wait_for_timeout(200)
+    ok(page.get_by_text("A newer version of PackPal is ready.").count() == 0, "P4 'Not now' hides the banner")
+    page.evaluate("() => { window.__pp_marker = 1; }")
+    page.reload(); page.get_by_text("A newer version of PackPal is ready.").wait_for(timeout=9000)
+    page.get_by_role("button", name="Reload", exact=True).click()
+    page.get_by_role("button", name="New Trip").wait_for(); page.wait_for_timeout(300)
+    ok(page.evaluate("() => window.__pp_marker") is None, "P4 banner's Reload reloads the page")
+    page.unroute("**/version.json*")
+    page.reload(); page.get_by_role("button", name="New Trip").wait_for(); page.wait_for_timeout(5000)
+    ok(page.get_by_text("A newer version of PackPal is ready.").count() == 0, "P4 no banner when the deployed version matches")
+
+    # ── E1 + E2: template editor drag-and-drop (sections, then items) ──
+    def drag(handle_from, handle_to, extra=8):
+        # Scroll the source grip near the top of the viewport (the editor is long), start the drag,
+        # then re-measure the target: sections collapse while one is being dragged, so it moves.
+        page.evaluate("el => el.scrollIntoView({ block: 'center' })", handle_from.element_handle()); page.wait_for_timeout(200)
+        b1 = handle_from.bounding_box()
+        x = b1["x"] + b1["width"] / 2; y0 = b1["y"] + b1["height"] / 2
+        page.mouse.move(x, y0); page.mouse.down(); page.mouse.move(x, y0 + 10); page.wait_for_timeout(250)
+        b2 = handle_to.bounding_box()
+        y1 = b2["y"] + b2["height"] / 2 + extra
+        for k in range(1, 11):
+            page.mouse.move(x, y0 + 10 + (y1 - y0 - 10) * k / 10); page.wait_for_timeout(25)
+        page.mouse.up(); page.wait_for_timeout(300)
+    page.get_by_role("button", name="Packing Template").click()
+    page.get_by_role("heading", name="Your default items").wait_for()
+    drag(page.get_by_label("Drag section Luggage", exact=True), page.get_by_label("Drag section Important Documents", exact=True))
+    drag(page.get_by_label("Drag Chase Credit Card", exact=True), page.get_by_label("Drag Keys", exact=True))
+    page.get_by_role("button", name="Save template").click(); page.get_by_role("button", name=re.compile(r"Saved")).wait_for()
+    tpl = json.loads(page.evaluate("localStorage.getItem('pp2_catalogTemplate') || 'null'"))
+    nec = list(tpl["necessities"].keys())
+    ok(nec[0] == "Important Documents" and nec[1] == "Luggage", f"E1 editor: dragged Luggage below Important Documents → saved section order {nec[:3]}")
+    docs = [i["name"] for i in tpl["necessities"]["Important Documents"]]
+    ok(docs.index("Keys") < docs.index("Chase Credit Card") and docs[0] == "Driver's License", f"E2 editor: dragged Chase Credit Card below Keys → {docs[:4]}")
+
+    # ── E3: add-ins tab — edit a ski add-in, add a rain add-in ──
+    page.get_by_role("button", name="Add-ins").click()
+    page.get_by_role("heading", name="Add-ins").wait_for()
+    ok(page.get_by_text("Ski / Snow", exact=True).count() >= 1 and page.get_by_text("Rain expected", exact=True).count() == 1 and page.get_by_text("Freezing", exact=True).count() == 1,
+       "E3 add-ins tab lists trip types and weather keys (bands + rain / snow)")
+    goggles = page.locator("input[value='Ski Goggles']").first
+    goggles.fill("Ski Goggles (Oakley)")
+    rain_card = page.locator("span", has_text=re.compile(r"^Rain expected$")).locator("xpath=../..")
+    rain_card.get_by_placeholder("New section name…").fill("Rain Gear"); rain_card.get_by_placeholder("New section name…").press("Enter")
+    rain_card.get_by_placeholder("Add to Rain Gear…").fill("Umbrella"); rain_card.get_by_placeholder("Add to Rain Gear…").press("Enter")
+    page.get_by_role("button", name="Save template").click(); page.get_by_role("button", name=re.compile(r"Saved")).wait_for()
+    ad = json.loads(page.evaluate("localStorage.getItem('pp2_addins') || 'null'"))
+    ok(ad and ad["weather"]["rain"]["Rain Gear"][0]["name"] == "Umbrella" and any(i["name"] == "Ski Goggles (Oakley)" for i in ad["types"]["ski"]["Ski Accessories"]),
+       "E3 add-ins persisted under pp2_addins (ski rename + new rain section)")
+    page.locator("button:has(svg.lucide-arrow-left)").first.click(); page.get_by_role("button", name="New Trip").wait_for()
+    ok(page.get_by_text("Customized").count() == 1, "E3 Home card reads 'Customized'")
+    # a ski trip with rain ticked on the weather step gets both add-ins
+    page.get_by_role("button", name="New Trip").click()
+    page.get_by_placeholder("e.g. Tokyo, Tulum, 90210...").fill("Whistler"); page.get_by_role("button", name="Continue").click()
+    page.get_by_role("button", name="Ski / Snow").click(); page.get_by_role("button", name="Continue").click()
+    page.get_by_role("button", name="Continue").click()          # details → weather
+    page.get_by_role("button", name="Freezing").click()
+    page.get_by_role("button", name="Rain expected").click()
+    page.get_by_role("button", name="Continue").click()          # → review
+    ok(page.get_by_text(re.compile(r"Freezing · 🌧️ Rain")).count() == 1, "E3 review step lists the band and the ticked condition")
+    page.get_by_role("button", name="Generate my list").click(); page.get_by_role("button", name="Focus Pack").wait_for()
+    wt = trips(page)[0]
+    umb = next((i for i in wt["items"] if i["name"] == "Umbrella"), None)
+    ok(wt["conditions"] == ["rain"] and umb and umb["section"] == "Rain Gear" and umb["category"] == "activewear", "E3 generated trip: conditions persisted, rain add-in under Rain Gear (Active & Chill)")
+    ok(any(i["name"] == "Ski Goggles (Oakley)" and i["category"] == "activewear" for i in wt["items"]) and not any(i["name"] == "Ski Goggles" for i in wt["items"]), "E3 generated trip: edited ski add-in replaces the built-in one")
+    go_home(page)
+
+    # ── L1–L3: trips over for a week+ open read-only ──
+    page.evaluate("""() => {
+      const ts = JSON.parse(localStorage.getItem('pp2_trips') || '[]');
+      const it = (id, n, c, s) => ({ id, name: n, category: c, section: s, packed: false, essential: false, ff: false, freq: 1, needsRefill: false, needsCharge: false });
+      ts.push({ id: 'old1', destination: 'Old Rome', tripType: ['city'], days: 3, weather: 'warm', startDate: '2026-01-05', tempRange: 'cool',
+        items: [it('o1', 'Passport', 'necessities', 'Important Documents'), it('o2', 'Charger', 'tech', 'Cables')],
+        otdItems: [], otdChecked: {}, createdAt: '2025-12-20T00:00:00.000Z', icon: '🏙️' });
+      localStorage.setItem('pp2_trips', JSON.stringify(ts));
+    }""")
+    page.reload(); page.get_by_role("button", name="New Trip").wait_for()
+    ok(page.get_by_text("Past trips", exact=True).count() == 1 and page.get_by_text("Ended Jan 7 · 0/2 packed").count() == 1 and page.get_by_text("Your trips", exact=True).count() == 1,
+       "L1 Home groups the January trip under 'Past trips' with its end date; current trips stay under 'Your trips'")
+    open_trip_locked = lambda: (page.locator("button", has_text="Old Rome").first.click(), page.get_by_text("this list is read-only now").wait_for())
+    open_trip_locked()
+    ok(page.get_by_text("Ended Jan 7").count() >= 1 and page.get_by_role("button", name="Focus Pack").count() == 0 and page.get_by_role("button", name="Mark Refills").count() == 0
+       and page.get_by_role("button", name="Arrange", exact=True).count() == 0 and page.get_by_role("button", name="Share", exact=True).count() == 1
+       and page.get_by_role("button", name="Save to template").count() == 1 and page.get_by_text("Add section").count() == 0,
+       "L2 locked trip: no Focus Pack / Trip Prep / Arrange / Add section; Share + Save to template remain")
+    page.get_by_text("Passport", exact=True).click(); page.wait_for_timeout(300)
+    ok(not any(i["packed"] for i in [t for t in trips(page) if t["id"] == "old1"][0]["items"]), "L2 tapping an item on a locked trip does not pack it")
+    page.get_by_role("button", name="Unlock").click(); page.wait_for_timeout(200)
+    ok(page.get_by_role("button", name="Focus Pack").count() == 1 and page.get_by_text("this list is read-only now").count() == 0, "L3 Unlock restores the editing controls")
+    page.get_by_text("Passport", exact=True).click(); page.wait_for_timeout(300)
+    ok(any(i["packed"] for i in [t for t in trips(page) if t["id"] == "old1"][0]["items"]), "L3 after Unlock, packing works again")
+    page.screenshot(path=f"{SHOTS}/11-past-trip-unlocked.png")
+    go_home(page)
+
     ok(not errors, f"No JS/page errors during the run ({len(errors)} captured)" + ("" if not errors else ": " + errors[0][:160]))
     print("Network failures (sandbox proxy, external resources only?):", *net, sep="\n  ")
     browser.close()
