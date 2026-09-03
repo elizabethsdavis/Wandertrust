@@ -25,7 +25,8 @@ steps. The deeper docs are indexed below.
   - Auto-collapse of completed sub-sections *and* completed categories in the trip view (pure UI state).
   - Editable **packing template** (`TemplateEditor.jsx` + new additive `catalogTemplate` key; `genList` uses it via a `coreOverride` param). The Out-the-Door checklist editor already existed.
 - **Tier 1 audit fixes applied (2026-09-03):** B2, B3, B4, B5 — see the ✅ rows in the bug table. Lint clean (0/0), `vite build` passes. No persisted-shape change.
-- **Committed locally, NOT pushed** — two commits on `main` (2026-09-03): `426a899` features + docs, then the Tier 1 fixes. `main` is 4 ahead of `origin/main`; push with `git pushpp` (see the git note at the bottom).
+- **On GitHub + deployed (2026-09-03):** the template/collapse features, these docs, and the Tier 1 fixes are on `origin/main` (`46056ba`…`fd7636a`, uploaded via the GitHub web UI) and live on Vercel.
+- **Tier 2 fixes committed locally (2026-09-03), not yet on GitHub** — one commit on top of `origin/main` (plus a HANDOFF-only commit). Files: `src/lib/packing.js`, `src/lib/utils.js`, `src/PackPal.jsx`, `HANDOFF.md`. Push (`git pushpp`) or web-upload; see the git note.
 
 ## HARD CONSTRAINTS (do not skip)
 - The app is **live with real Firestore data**. **No change to the persisted data shape without a backward-compatible migration + fallback.** There is no schema version and no read-time normalizer, so every field name in the state blob is a frozen contract.
@@ -48,15 +49,15 @@ Overall: **B+ — "a senior engineer built this, but the main file is mid-refact
 ### Confirmed bugs
 | # | Bug | File | Fix | Risk |
 |---|-----|------|-----|------|
-| B1 | **Conditional items leak into every trip** — `genList` guard `it.cond && !some && it.f < 0.5` lets any `cond` item with `f≥0.5` (Passport, Corporate badge, Boarding Passes) onto *all* trips regardless of type. | `src/lib/packing.js:17-18` | Gate purely on the condition: `if (it.cond && !it.cond.some(t=>ts.includes(t))) return;` | Low, behavioral — test |
+| B1 | ✅ **FIXED** — **Conditional items leak into every trip** — `genList` guard `it.cond && !some && it.f < 0.5` lets any `cond` item with `f≥0.5` (Passport, Corporate badge, Boarding Passes) onto *all* trips regardless of type. | `src/lib/packing.js:17-18` | Gate purely on the condition: `if (it.cond && !it.cond.some(t=>ts.includes(t))) return;` | Low, behavioral — test |
 | B2 | ✅ **FIXED** — **`catalogTemplate` dropped in local/offline mode** — new key missing from `KNOWN_KEYS`, so the user's template isn't mirrored to localStorage (fine in cloud mode, lost in LOCAL_MODE / offline fallback). *(Defect in this session's feature.)* | `src/lib/store.jsx:23` | Add `"catalogTemplate"` to `KNOWN_KEYS`. | **None (additive)** |
 | B3 | ✅ **FIXED** — **Undefined color token** — `C.sageDeep` doesn't exist → broken gradient on the refilled checkbox. | `src/PackPal.jsx` (FocusRefill) | `sageDeep` → `sageDark`. | None |
 | B4 | ✅ **FIXED** — **Stale "Supabase" copy** — offline users are told to add "Supabase keys"; app is Firebase now. | `src/components/Account.jsx:92-93`, `PackPal.jsx:129` (comment) | Update to Firebase / SETUP.md. | None |
 | B5 | ✅ **FIXED** — **`catOverride` (category collapse) not reset across trips** — expand a done category in trip A, open trip B, its match starts expanded. *(This session's feature.)* | `src/PackPal.jsx` (trip view) | Keyed the override by `${trip.id}:${cat.id}`; also keyed the items container by `activeTrip.id` so `PackSection`'s local collapse state remounts on a direct trip→trip switch (Duplicate from inside a trip). | Low |
 | B6 | **One-shot migration runs stale in cloud mode** — checkout→OTD `useEffect([])` reads empty `trips` before the async Firestore load, so it never runs for cloud users (and would write from a stale base if it did). | `src/PackPal.jsx:2483` | Gate on `useStoreMeta().ready` + loaded data. | Med |
-| B7 | **`dupTrip` carries `otdChecked` + stale `outfitPlan` item ids.** | `src/PackPal.jsx` (dupTrip) | Reset `otdChecked:{}`, deep-copy/clear `outfitPlan`. | Low |
-| B8 | **Phantom `jewelry` slot** — a local `OUTFIT_SLOTS` shadow with a non-existent slot under-counts the outfit-complete celebration. | `src/PackPal.jsx` (handleDoneOutfit) | Delete the shadow; use module `OUTFIT_SLOTS`. | Low |
-| B9 | **Emoji `.slice(-2)`** corrupts multi-codepoint emoji (flags/ZWJ). | `src/PackPal.jsx` (day/occasion emoji inputs) | `Array.from(str).slice(-1)[0]`. | Low |
+| B7 | ✅ **FIXED** — **`dupTrip` carries `otdChecked` + stale `outfitPlan` item ids.** | `src/PackPal.jsx` (dupTrip) | `otdChecked:{}`; items also clear `refilled`/`charged`; `outfitPlan` kept but deep-copied with fresh occasion ids (`outfitDayNames`/`dayEmojis` copied too). | Low |
+| B8 | ✅ **FIXED** — **Phantom `jewelry` slot** — a local `OUTFIT_SLOTS` shadow with a non-existent slot under-counts the outfit-complete celebration. | `src/PackPal.jsx` (handleDoneOutfit) | Delete the shadow; use module `OUTFIT_SLOTS`. | Low |
+| B9 | ✅ **FIXED** — **Emoji `.slice(-2)`** corrupts multi-codepoint emoji (flags/ZWJ). | `src/PackPal.jsx` (day/occasion/new-type emoji inputs) | New `lastGrapheme()` in `lib/utils.js` (Intl.Segmenter grapheme clusters, code-point fallback) — `Array.from().slice(-1)` alone still splits flags. | Low |
 | B10 | **`signOut` doesn't clear the localStorage mirror** — a second user on the same device can transiently see the previous user's trips. | `src/lib/auth.jsx` + `store.jsx` | Clear `pp2_*` on sign-out (or namespace by uid). | Med |
 
 ### DB-safety (data-layer audit)
@@ -74,7 +75,8 @@ Overall: **B+ — "a senior engineer built this, but the main file is mid-refact
 
 ## Recommended next steps (pending user approval — "audit, then approve")
 **Tier 1 — ✅ DONE (2026-09-03):** B2, B3, B4, B5. Verified with `npm run lint` + `vite build`; not yet eyeballed in the dev server.
-**Tier 2 — confirmed bugs, low-risk behavioral (test each):** B1 (genList cond), B7, B8, B9.
+**Tier 2 — ✅ DONE (2026-09-03):** B1, B7, B8, B9. Lint clean, build passes, 28 node-level checks on `genList` / `lastGrapheme` / the dup logic. Not yet eyeballed in the dev server.
+  - B1 effect, measured against the real catalog: only two items change — **Passport** no longer appears on trips that aren't `international`/`beach`, and **Corporate badge** only on `business`. Nothing is added; existing trips are untouched (items are persisted per trip). Note: *Boarding Passes* has no `cond` and still appears everywhere (the original audit line was slightly off). Data question for Elizabeth: Passport's `cond` doesn't include `safari` — tag safari trips as International too, or add `safari` to its `cond` in `data/catalog.js`.
 **Tier 3 — needs care/testing:** B6 (migration timing), B10 (sign-out mirror), and the `activeTrip`-derivation refactor.
 **Tier 4 — larger, staged:** extract the SAFE leaf components from `PackPal.jsx` (dev server running); design DB hardening (onSnapshot / size guard) — the multi-device + 1 MiB items are real but architectural.
 
@@ -82,3 +84,5 @@ Also outstanding: run `get_runtime_errors` on the Vercel project; commit + push 
 
 ## Git note
 This repo pushes through a per-repo alias because the machine has two GitHub accounts + an `insteadOf` SSH rewrite. Use **`git pushpp`** (defined in `.git/config`) to push as `elizabethsdavis`. Plain `git push` fails with "denied to elizabeth-davis-dd."
+
+**Fallback when pushing isn't possible:** the repo is public and the Vercel project is Git-linked, so uploading changed files through GitHub's web UI (`Add file → Upload files`, one folder at a time — the uploader drops files into whatever folder you're viewing; Safari can't drag folders) commits to `main` and auto-deploys. Afterwards reconcile the local clone with `git fetch origin && git reset --hard origin/main` (safe only when the trees are identical — verify with `git diff --stat HEAD origin/main` first). Note `pushpp` pushes to a URL, so `origin/main` is NOT updated by it; run `git fetch origin` to refresh the ahead/behind count.
