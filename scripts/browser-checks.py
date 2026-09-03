@@ -285,6 +285,167 @@ with sync_playwright() as p:
     names = [i["name"] for i in trips(page)[0]["items"]]
     ok("Playwright test item" in names and "Passport" not in names, "B2+B1: new trip generated from the edited template (and B1 gating still applies through it)")
 
+    # ══════════════════════════════════════════════════════════════════════
+    # UX batch (2026-09-03): health category + migrations, laundry mode, collapse
+    # all, share, brand/colour + fix-it, tops/bottoms, save-to-template, arrange.
+    # ══════════════════════════════════════════════════════════════════════
+    page.evaluate("() => localStorage.clear()")
+    page.reload(); page.get_by_role("button", name="New Trip").wait_for()
+
+    # ── U1: Health & Wellness on new trips + migration of legacy trips ──
+    create_trip(page, "Lisbon", ["City Trip"])
+    t = trips(page)[0]
+    health = [i for i in t["items"] if i["category"] == "health"]
+    ok(len(health) >= 10 and any(i["name"] == "Advil" for i in health) and not any(i["category"] == "necessities" and i["section"] == "Pain & Sickness" for i in t["items"]),
+       f"U1 new trip: {len(health)} Health & Wellness items, none left under Necessities")
+    ok(page.get_by_text("Health & Wellness", exact=True).count() >= 1, "U1 'Health & Wellness' category header renders")
+    page.evaluate("""() => {
+      const ts = JSON.parse(localStorage.getItem('pp2_trips') || '[]');
+      const it = (id, n, c, s) => ({ id, name: n, category: c, section: s, packed: false, essential: false, ff: false, freq: 1, needsRefill: false, needsCharge: false });
+      ts.push({ id: 'legacy2', destination: 'Legacy Two', tripType: ['city'], days: 3, weather: 'warm', startDate: '', tempRange: '',
+        items: [it('m1', 'Advil', 'necessities', 'Pain & Sickness'), it('m2', 'Keys', 'necessities', 'Important Documents'),
+                it('m3', 'Cream top', 'outfits', 'Clothing'), it('m4', 'Blue jeans', 'outfits', 'Clothing')],
+        otdItems: [], otdChecked: {}, createdAt: '2026-01-01T00:00:00.000Z', icon: '🏙️',
+        outfitPlan: [[{ id: 'oc', type: 'daytime', label: 'Day', slots: { top: 'Cream top', bottom: 'Blue jeans' } }]] });
+      localStorage.setItem('pp2_trips', JSON.stringify(ts));
+    }""")
+    page.goto(BASE + "/"); page.get_by_role("button", name="New Trip").wait_for(); page.wait_for_timeout(500)
+    lg = [t for t in trips(page) if t["id"] == "legacy2"][0]
+    by = {i["id"]: i for i in lg["items"]}
+    ok(by["m1"]["category"] == "health" and by["m2"]["category"] == "necessities", "U1 migration: legacy Pain & Sickness item → Health & Wellness; Keys stays")
+    ok(by["m3"]["section"] == "Tops" and by["m4"]["section"] == "Bottoms", "U6 migration: legacy 'Clothing' items split into Tops / Bottoms using the outfit plan")
+
+    # ── U2: Laundry mode ──
+    open_trip(page, "Lisbon")
+    page.get_by_role("button", name="Mark Laundry").click()
+    ok(page.get_by_text("Tap clothes that need a wash before you pack them").count() == 1, "U2 laundry banner")
+    page.get_by_text("Underwear", exact=True).click()
+    page.get_by_text("Socks", exact=True).click()
+    page.get_by_role("button", name=re.compile(r"^Done \(2\)")).click()
+    ok(page.get_by_role("button", name="Laundry 0/2").count() == 1, "U2 'Laundry 0/2' after marking two items")
+    page.get_by_role("button", name=re.compile(r"^Focus \(2\)$")).click()
+    page.get_by_text("Needs wash", exact=True).first.wait_for()
+    page.get_by_role("button", name="Clean").first.click()
+    page.wait_for_timeout(300)
+    ok(page.get_by_text(re.compile(r"1 of 1 remaining")).count() == 1, "U2 Focus Laundry: one marked clean, one remaining")
+    page.get_by_role("button", name="Exit").click()
+    page.get_by_role("button", name="Focus Pack").wait_for()
+    li = [i for i in trips(page)[0]["items"] if i.get("needsWash")]
+    ok(len(li) == 2 and sum(1 for i in li if i.get("washed")) == 1, "U2 persisted: needsWash on 2 items, washed on 1")
+    ok(page.get_by_role("button", name="Laundry 1/2").count() == 1 and page.get_by_text("Clean", exact=True).count() >= 1, "U2 trip view shows Laundry 1/2 and a 'Clean' chip")
+
+    # ── U3: Collapse all / Expand all (sections only) ──
+    before = page.evaluate(CAT_ITEMS_JS, "Travel Necessities")
+    page.get_by_role("button", name="Collapse").click(); page.wait_for_timeout(200)
+    ok(len(before) > 0 and page.evaluate(CAT_ITEMS_JS, "Travel Necessities") == [] and page.evaluate(CAT_OPEN_JS, "Travel Necessities"),
+       "U3 Collapse: every section folded, the category itself stays open")
+    page.get_by_role("button", name="Expand").click(); page.wait_for_timeout(200)
+    ok(len(page.evaluate(CAT_ITEMS_JS, "Travel Necessities")) == len(before), "U3 Expand: sections open again")
+
+    # ── U4: Share as Markdown ──
+    page.get_by_role("button", name="Share", exact=True).click()
+    page.get_by_role("heading", name="Share list").wait_for()
+    md = page.locator("textarea[aria-label='Markdown preview']").input_value()
+    open(f"{SHOTS}/lisbon-export.md", "w", encoding="utf-8").write(md)
+    laundry_lines = [l for l in md.splitlines() if l.startswith("- [ ] ") and " — " in l and ("needs wash" in l or "clean" in l)]
+    ok(md.startswith("# 🏙️ Lisbon") and "## 💊 Health & Wellness" in md and len(laundry_lines) == 2 and "## 🚪 Out the Door" in md,
+       f"U4 Markdown preview: title, categories, laundry flags ({laundry_lines}), OTD list" + ("" if md.startswith("# 🏙️ Lisbon") else f" — got {md[:80]!r}"))
+    with page.expect_download() as dl:
+        page.get_by_role("button", name=re.compile(r"^Download packpal-lisbon-")).click()
+    d = dl.value; path = d.path(); content = open(path, encoding="utf-8").read()
+    ok(d.suggested_filename.startswith("packpal-lisbon-") and d.suggested_filename.endswith(".md") and content == md, f"U4 download: {d.suggested_filename}, contents match the preview")
+    page.locator("button[aria-label='Close']").first.click()
+
+    # ── U5 + U6: brand/colour parsing, fix-it sheet, Tops/Bottoms sections on sync ──
+    page.get_by_role("button", name="Build Outfits").click()
+    page.get_by_text("Your outfits").wait_for()
+    page.locator("button", has_text="Tap to start building this outfit").first.click()
+    page.get_by_role("button", name=re.compile(r"^Add new top")).wait_for()
+    add_in_current_slot("Cream cashmere top")            # → Bottoms
+    add_in_current_slot("Blue Zevelyn jeans")            # → Layer
+    page.evaluate("""() => { [...document.querySelectorAll('button')].filter(b=>b.style.height==='10px')[1].click(); }""")  # back to Bottoms
+    page.wait_for_timeout(300)
+    ok(page.get_by_text("Zevelyn", exact=True).count() == 1, "U5 wardrobe card shows the capitalized brand 'Zevelyn'")
+    SWATCH_JS = """(brand) => { const row=[...document.querySelectorAll("[title='Tap to fix the colour or brand']")].find(r=>r.textContent===brand); return row ? getComputedStyle(row.firstElementChild).backgroundColor : null; }"""
+    sw = page.evaluate(SWATCH_JS, "Zevelyn")
+    ok(sw == "rgb(123, 163, 201)", f"U5 swatch is the blue family ({sw})")
+    page.get_by_title("Tap to fix the colour or brand").first.click()
+    page.get_by_role("heading", name="Fix details").wait_for()
+    page.get_by_role("button", name="Colour Black").click()
+    page.get_by_label("Brand").fill("Levi's")
+    page.get_by_role("button", name="Save").click()
+    page.wait_for_timeout(300)
+    sw2 = page.evaluate(SWATCH_JS, "Levi's")
+    meta = json.loads(page.evaluate("localStorage.getItem('pp2_wardrobeMeta') || '{}'"))
+    ok(sw2 == "rgb(45, 41, 38)" and meta.get("Blue Zevelyn jeans") == {"color": "black", "brand": "Levi's"}, f"U5 fix-it: swatch black, brand Levi's, stored in wardrobeMeta ({meta})")
+    page.get_by_role("button", name="Done").first.click()
+    page.get_by_role("button", name=re.compile(r"^Done — sync to packing list")).click()
+    page.get_by_role("button", name="Focus Pack").wait_for()
+    secs = {(i["section"]) for i in trips(page)[0]["items"] if i["category"] == "outfits"}
+    ok(secs == {"Tops", "Bottoms"}, f"U6 synced outfit items land in 'Tops' and 'Bottoms' ({sorted(secs)})")
+
+    # ── U7: Save to template (added item + flag) and the editor toggles ──
+    # "Add section" inside Travel Necessities (the first one on the page belongs to Outfits, which the template diff ignores)
+    page.locator("span", has_text=re.compile(r"^Travel Necessities$")).locator("xpath=../..").get_by_text("Add section", exact=True).click()
+    page.get_by_placeholder("New section name...").fill("Gadgets"); page.get_by_placeholder("New section name...").press("Enter")
+    page.wait_for_timeout(200)
+    page.get_by_role("button", name="Mark Refills").click()
+    page.get_by_text("Advil", exact=True).click()
+    page.get_by_role("button", name=re.compile(r"^Done \(1\)")).click()
+    page.get_by_role("button", name="Save to template").click()
+    page.get_by_role("heading", name="From Lisbon").wait_for()
+    ok(page.get_by_text("New item", exact=True).count() == 1 and page.get_by_text("Added here").count() == 1, "U7 diff: the new section's placeholder item shows under 'Added here'")
+    ok(page.get_by_text("Advil", exact=True).count() == 1 and page.get_by_text("Flagged here").count() == 1, "U7 diff: Advil's refill flag shows under 'Flagged here'")
+    # 1 added (New item) + 3 flagged (Advil refill, Underwear + Socks laundry from U2) = 4 pre-ticked changes
+    ok(page.get_by_role("button", name="Apply 4 changes to template").count() == 1, "U7 footer counts the 4 pre-ticked changes (added + flagged; removals stay opt-in)")
+    page.get_by_role("button", name="Apply 4 changes to template").click()
+    page.get_by_role("heading", name="Template updated").wait_for()
+    tpl = json.loads(page.evaluate("localStorage.getItem('pp2_catalogTemplate') || 'null'"))
+    tpl_advil = next((i for i in (tpl or {}).get("health", {}).get("Pain & Sickness", []) if i["name"] == "Advil"), None)
+    ok(tpl_advil is not None and tpl_advil.get("needsRefill") is True and any(i["name"] == "New item" for i in (tpl or {}).get("necessities", {}).get("Gadgets", [])),
+       "U7 template stored: Advil flagged for refill, 'Gadgets' section (with its placeholder) added under Necessities")
+    page.get_by_role("button", name="Back to trip").click(); go_home(page)
+    create_trip(page, "Porto", ["City Trip"])
+    porto = trips(page)[0]
+    adv = next(i for i in porto["items"] if i["name"] == "Advil")
+    ok(adv["needsRefill"] is True and any(i["section"] == "Gadgets" for i in porto["items"]), "U7 next trip starts with Advil flagged for refill and the Gadgets section")
+    go_home(page)
+    page.get_by_role("button", name="Packing Template").click()
+    ok(page.locator("button[aria-pressed='true'][aria-label='Needs refill before each trip']").count() == 1, "U7 template editor shows the refill toggle pressed on Advil")
+    page.locator("button:has(svg.lucide-arrow-left)").first.click(); page.get_by_role("button", name="New Trip").wait_for()
+
+    # ── U8: Arrange mode — drag a section, then an item ──
+    open_trip(page, "Porto")
+    page.get_by_role("button", name="Arrange", exact=True).click()
+    page.get_by_text("Drag the grip to reorder sections").wait_for()
+    def sections_of(cat):
+        return [s for s in ([sec for sec in dict.fromkeys(i["section"] for i in trips(page)[0]["items"] if i["category"] == cat)])]
+    before_secs = sections_of("necessities")
+    h1 = page.get_by_label("Drag section " + before_secs[0], exact=True).first
+    h2 = page.get_by_label("Drag section " + before_secs[1], exact=True).first
+    b1, b2 = h1.bounding_box(), h2.bounding_box()
+    page.mouse.move(b1["x"] + b1["width"] / 2, b1["y"] + b1["height"] / 2); page.mouse.down()
+    for k in range(1, 11):
+        page.mouse.move(b1["x"] + b1["width"] / 2, b1["y"] + (b2["y"] + b2["height"] / 2 + 10 - b1["y"]) * k / 10); page.wait_for_timeout(30)
+    page.mouse.up(); page.wait_for_timeout(400)
+    after_secs = sections_of("necessities")
+    ok(after_secs[0] == before_secs[1] and after_secs[1] == before_secs[0] and len(after_secs) == len(before_secs), f"U8 dragged section '{before_secs[0]}' below '{before_secs[1]}' → persisted order {after_secs[:3]}")
+    page.get_by_role("button", name=re.compile(r"^" + re.escape(after_secs[0]) + r"\s")).first.click()   # open the (now first) section
+    page.wait_for_timeout(200)
+    items_in = [i for i in trips(page)[0]["items"] if i["category"] == "necessities" and i["section"] == after_secs[0]]
+    i1 = page.get_by_label("Drag " + items_in[0]["name"], exact=True).first   # names may contain quotes (Driver's License)
+    i2 = page.get_by_label("Drag " + items_in[1]["name"], exact=True).first
+    c1, c2 = i1.bounding_box(), i2.bounding_box()
+    page.mouse.move(c1["x"] + c1["width"] / 2, c1["y"] + c1["height"] / 2); page.mouse.down()
+    for k in range(1, 11):
+        page.mouse.move(c1["x"] + c1["width"] / 2, c1["y"] + (c2["y"] + c2["height"] / 2 + 6 - c1["y"]) * k / 10); page.wait_for_timeout(30)
+    page.mouse.up(); page.wait_for_timeout(400)
+    now = [i["name"] for i in trips(page)[0]["items"] if i["category"] == "necessities" and i["section"] == after_secs[0]]
+    ok(now[0] == items_in[1]["name"] and now[1] == items_in[0]["name"], f"U8 dragged item '{items_in[0]['name']}' below '{items_in[1]['name']}' → persisted")
+    page.get_by_role("button", name="Done", exact=True).first.click()
+    page.get_by_role("button", name="Focus Pack").wait_for()
+    page.screenshot(path=f"{SHOTS}/10-ux-trip-view.png")
+
     ok(not errors, f"No JS/page errors during the run ({len(errors)} captured)" + ("" if not errors else ": " + errors[0][:160]))
     print("Network failures (sandbox proxy, external resources only?):", *net, sep="\n  ")
     browser.close()
