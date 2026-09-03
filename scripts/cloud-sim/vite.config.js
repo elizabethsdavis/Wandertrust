@@ -8,13 +8,14 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { versionStamp } from "../version-stamp.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "../..");
 
 export default defineConfig({
   root,
-  plugins: [react()],
+  plugins: [react(), versionStamp()],
   resolve: {
     alias: [{ find: /^firebase\/(app|auth|firestore|functions)$/, replacement: path.join(here, "fake-firebase.js") }],
   },
