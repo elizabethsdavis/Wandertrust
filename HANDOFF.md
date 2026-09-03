@@ -16,7 +16,7 @@ steps. The deeper docs are indexed below.
 - **AUTH_AND_PROFILE.md** — deep-dive on the sign-in flow + user profile (UX + backend).
 - **SETUP.md** — click-by-click Firebase/Vercel provisioning.
 - **README.md** — run instructions.
-- **scripts/browser-checks.py** — Playwright regression run for every audit fix (B1–B5, B7–B9): builds nothing itself; serve `dist/` with `vite preview` in LOCAL_MODE and run it. 36/36 on 2026-09-03 (Tier 3 build). Re-run after each tier.
+- **scripts/browser-checks.py** — Playwright regression run for every audit fix (B1–B5, B7–B9) **plus the UX batch (U1–U8: health category + migrations, laundry mode, collapse/expand, share, brand/colour + fix-it, tops/bottoms, save-to-template, arrange drag)**: builds nothing itself; serve `dist/` with `vite preview` in LOCAL_MODE and run it (`PP_BASE=http://localhost:<port>`). 61/61 on 2026-09-03 (UX-batch build). Re-run after each change.
 - **scripts/cloud-checks.py** + **scripts/cloud-sim/** — CLOUD-mode browser checks against an in-memory Firebase stand-in (aliased in at build time; never shipped; supports `onSnapshot` + `runTransaction`, and two tabs share one fake cloud). Covers load/save/flush, the size guard, failure + Retry + online auto-retry, the missing-doc guard, sign-out flush-then-clear, the uid-owned mirror, and multi-device: live updates, merge-while-dirty, transactional conflict, two-tab convergence, remote deletion of the open trip. 40/40 on 2026-09-03 (the multi-device block fails 10/11 on the pre-4b store — that's the data loss it fixes). Run instructions in the file header.
 
 ## Current state (as of this handoff)
@@ -31,17 +31,20 @@ steps. The deeper docs are indexed below.
 - **Tier 2 on GitHub + deployed (2026-09-03):** `34da6d3`…`4c5708e` (web-uploaded in three commits) — live on Vercel. Local `main` == `origin/main`.
 - **Tier 3 on GitHub + deployed (2026-09-03):** `da7ccc6`…`0a82b48` (web-uploaded in five commits) — live on Vercel. B10 still needs its one manual pass on the live site (see Tier 3 below). Local `main` == `origin/main`.
 - **Tier 4 (a + b) on GitHub + deployed (2026-09-03):** `0deea81`…`832e8fe` (web-uploaded in six commits) — live on Vercel. The multi-device manual check (phone + laptop) is still worth doing once. Local `main` == `origin/main`.
-- **Tier 4c committed locally (2026-09-03), not yet on GitHub:** the `PackPal.jsx` decomposition + the three nits + ARCHITECTURE.md refresh. Files: `src/PackPal.jsx`, 10 new `src/components/*.jsx`, `src/data/otdDefaults.js` (new), `src/lib/utils.js`, `src/lib/importHist.js`, `src/lib/theme.js`, `scripts/browser-checks.py`, `scripts/cloud-checks.py` (ports now overridable via `PP_BASE` / `PP_CLOUD_BASE`), `ARCHITECTURE.md`, `HANDOFF.md`.
+- **Tier 4c on GitHub + deployed (2026-09-03):** `0b600f0`…`e1387bd` (web-uploaded in six commits) — live on Vercel. Local `main` == `origin/main`. **Nothing from the audit is outstanding.**
+- **UX batch (2026-09-03) — built + verified, see "UX batch" below.** Eight features Elizabeth asked for after the audit: drag-and-drop arrange, Health & Wellness category, Markdown share/export, brand + colour parsing with a fix-it sheet, Tops/Bottoms sections on outfit sync, collapse/expand all, Laundry mode, and "Save to template" with per-item refill/charge/laundry flags. Lint 0/0, `vite build` passes, browser harness 61/61, cloud harness 40/40, 55 node-level checks on the new pure modules. **New dependency:** `@dnd-kit/core`, `@dnd-kit/sortable`, `@dnd-kit/utilities` — run `npm install` once after pulling. Persisted-shape additions are all additive (listed under HARD CONSTRAINTS) and the two relabels ship with an idempotent load-time migration (`src/lib/migrations.js`).
 
 ## HARD CONSTRAINTS (do not skip)
 - The app is **live with real Firestore data**. **No change to the persisted data shape without a backward-compatible migration + fallback.** There is no schema version and no read-time normalizer, so every field name in the state blob is a frozen contract.
 - Persisted shape (from the DB audit):
-  - `state/{uid}` = `{ state: "<JSON string>", updatedAt }`. The parsed string holds the `usePersist` keys: `trips[]`, `wardrobe{}`, `customOccasions[]`, `otdItems[]`, `catalogTemplate|null`.
+  - `state/{uid}` = `{ state: "<JSON string>", updatedAt }`. The parsed string holds the `usePersist` keys: `trips[]`, `wardrobe{}`, `customOccasions[]`, `otdItems[]`, `catalogTemplate|null`, `wardrobeMeta{}` (UX batch; `{ [itemName]: { color?, brand? } }` — manual corrections only, absent = parse the name).
     - `trip` = `{ id, destination, tripType[], days, weather, startDate, tempRange, items[], otdItems[], otdChecked{index:bool}, createdAt, icon, weatherData }`.
-    - `item` = `{ id, name, category, section, packed, essential, ff, freq, needsRefill, needsCharge, refilled?, charged? }`; `category ∈ outfits|activewear|necessities|tech|toiletries|checkout`.
+    - `item` = `{ id, name, category, section, packed, essential, ff, freq, needsRefill, needsCharge, refilled?, charged?, needsWash?, washed? }`; `category ∈ outfits|activewear|necessities|health|tech|toiletries|checkout`. `needsWash`/`washed` (Laundry mode) and the `health` category are UX-batch additions; `health` is populated by `genList` for new trips and by the load-time migration for old ones (six sections moved out of `necessities`: Hydration, Nutrition, Supplement Stack, Energy: Sleep & Wake, Pain & Sickness, Hygiene & Immune). Outfit-synced items now use sections `Tops` / `Bottoms` / `Shoes` / … instead of one `Clothing` section (migrated using the trip's `outfitPlan`; anything unmatched stays `Clothing`). **Order is the array order of `trip.items`** — Arrange mode just rewrites the array, no position field.
+    - template item (`catalogTemplate[cat][section][]`) = `{ name, f, e?, ff?, cond?, needsRefill?, needsCharge?, needsWash? }` — the three flags are UX-batch additions, copied onto generated items by `genList`. `migrateTemplate` moves the six health sections from `necessities` to `health` in a stored template.
   - `users/{uid}` = `{ phone, onboarded, createdAt }`.
   - `credentials/{autoId}`, `challenges/{autoId}` — passkeys, server-only.
-  - localStorage mirror keys: `pp2_trips|pp2_wardrobe|pp2_customOccasions|pp2_otdItems|pp2_catalogTemplate`, plus `pp2_owner` = the uid the cached data belongs to (since Tier 3; absent for local-mode / pre-cloud data so onboarding can still import it). Helpers live in `src/lib/localMirror.js`.
+  - localStorage mirror keys: `pp2_trips|pp2_wardrobe|pp2_customOccasions|pp2_otdItems|pp2_catalogTemplate|pp2_wardrobeMeta`, plus `pp2_owner` = the uid the cached data belongs to (since Tier 3; absent for local-mode / pre-cloud data so onboarding can still import it). Helpers live in `src/lib/localMirror.js`.
+  - **Migrations (`src/lib/migrations.js`)** run once per load in `PackPal.jsx` after the store is `ready`, are idempotent, and only write when something changed: (1) legacy `checkout` items → `otdItems` (pre-existing), (2) `necessities` items in the six health sections → `category: "health"`, (3) `outfits` items in section `Clothing` → `Tops`/`Bottoms`/… via `slotToSection` + the trip's `outfitPlan`; plus `migrateTemplate` for a stored `catalogTemplate`. A device still on the old build keeps migrated data intact (its category loop skips `health` items until it updates — they stay in the blob and in the counts — and the three-way merge keeps both sides' edits).
 
 ---
 
@@ -81,6 +84,27 @@ Overall (at audit time): **B+ — "a senior engineer built this, but the main fi
 
 ---
 
+## UX batch (2026-09-03) — what shipped and where it lives
+
+Elizabeth's eight requests after the audit, with the UX decisions she made in chat. Everything is additive to the persisted shape (see HARD CONSTRAINTS) and covered by the harness section "UX batch" (U1–U8) plus node tests.
+
+| # | Feature | Decision | Where |
+|---|---------|----------|-------|
+| 1 | **Arrange** (reorder items + sections) | Drag-and-drop with grip handles (dnd-kit; pointer needs 6 px, touch a 180 ms hold so scrolling still scrolls; keyboard works). Sections drag within their category; tap a section to open it and drag items. | Quick action `Arrange` → `components/ArrangeList.jsx`; pure helpers `lib/reorder.js` (`moveSection`, `moveItem` rebuild `trip.items`). |
+| 2 | **Health & Wellness** category | Split out of Travel Necessities: Supplement Stack, Energy: Sleep & Wake, Pain & Sickness, Hygiene & Immune, Hydration, Nutrition. Existing trips migrated too. | `data/taxonomy.js` (`health`, 💊), `data/catalog.js` (`CORE.health`), `lib/migrations.js`, `lib/importHist.js` (history import maps supplement/medicine/hydration/nutrition sections to `health`). |
+| 3 | **Share** (download in real time, Claude-friendly) | Markdown checklist: `# trip`, `## category (done/total)`, `### section`, `- [x] item — needs refill / charged / needs wash / essential / don't forget`, then the Out-the-Door list. Sheet offers Copy as text, Share… (native share sheet when the browser has one — iOS Safari does), Download `.md`, and a preview. | Quick action `Share` → `components/ShareSheet.jsx`; `lib/exportList.js` (`tripToMarkdown`, `markdownFileName`). |
+| 4 | **Brand + colour parsing** for wardrobe items | Capitalized words that aren't colours/garments/materials are the brand (first run, up to three words: "Away Everywhere Bag" → *Away Everywhere*; ALL-CAPS counts; a small known-brand list catches lower-case "zara"). Colours: 17 families, ~120 names, longest-match, whole-word (so "tank" no longer reads as *tan*), light/dark modifiers, two-tone swatch for "black and white", patterns (striped, floral, plaid…) shown as a chip. Manual override: tap the swatch on a wardrobe card → "Fix details" → colour grid + brand field; stored in `wardrobeMeta`, `Auto` clears it. | `lib/wardrobe.js` (`parseItemMeta`, `swatchBackground`, `COLOR_FAMILIES`, `KNOWN_BRANDS`), `components/WardrobeMetaPicker.jsx`, `WardrobeCarousel` in `PackPal.jsx`. |
+| 5 | **Tops / Bottoms** sub-sections on outfit sync | Synced outfit items land in `Tops`, `Bottoms`, `Shoes`, `Bags & Purses`, `Jewelry`, `Eyewear`, `Hair Accessories`, `Outerwear` by slot (was one `Clothing` section). Old trips migrated via their `outfitPlan`. | `lib/migrations.js` (`slotToSection`), `OutfitBuilder` sync in `PackPal.jsx`. |
+| 6 | **Collapse / Expand all** | Sections only (categories stay open). One button beside the search box; it forces every section's local state and later manual toggles still work. | `PackPal.jsx` (`sectionsForce`), `PackSection` `forceOpen` prop in `components/PackList.jsx`. |
+| 7 | **Laundry** mode (the "needs to be washed" sibling of Refills/Charges) | Wording: button **Mark Laundry** → tag **Needs wash** → done state **Clean**; `Laundry 1/2` counter, **Focus** button opens a swipe-through Focus Laundry (lavender), celebration "Fresh & clean!". Flags: `needsWash` / `washed` on the item. | `PackPal.jsx` (`washMode`, `toggleWash`, `toggleWashed`), `components/FocusLaundry.jsx`, `PackList.jsx`, `GuidedPack.jsx` (chip + Clean button), `celebration.jsx` (`allWashed`). |
+| 8 | **Update the template from a trip + pre-specify flags** | Quick action **Save to template** diffs the open trip against the template: *Added here* (pre-ticked), *Flagged here* (refill/charge/laundry the template lacks, pre-ticked), *Removed here* (opt-in). Apply → template updated; existing trips untouched. The template editor also has three per-item toggles (refill / charge / laundry) so new trips start pre-marked; `genList` copies the flags. | `lib/template.js` (`diffTripAgainstTemplate`, `applyTemplateChanges`, `FLAGS`), `components/TemplateSync.jsx`, `components/TemplateEditor.jsx`, `lib/packing.js`. |
+
+Manual checks worth one pass on the live site after deploy: (a) open an old trip → the six health sections now sit under 💊 Health & Wellness and outfit items under Tops/Bottoms, nothing lost; (b) on the phone, Share → **Share…** opens the iOS share sheet with the Markdown; (c) Arrange on the phone: a plain swipe over the list scrolls, holding a grip then moving reorders.
+
+Ideas not built (colour parsing, for Elizabeth to pick from): remember corrections by *word* rather than by item ("Zevelyn" fixed once → applies to every Zevelyn item); learn brands from her own wardrobe (any word she has corrected to a brand becomes a known brand); let the colour grid show the two-tone/pattern options too; and, if the wardrobe grows, an optional AI pass over item names (needs a backend call, so it was left out).
+
+---
+
 ## Recommended next steps (pending user approval — "audit, then approve")
 **Tier 1 — ✅ DONE (2026-09-03):** B2, B3, B4, B5. Verified with `npm run lint` + `vite build`, and browser-verified 2026-09-03 via `scripts/browser-checks.py` (Playwright, LOCAL_MODE).
 **Tier 2 — ✅ DONE (2026-09-03):** B1, B7, B8, B9. Lint clean, build passes, 28 node-level checks on `genList` / `lastGrapheme` / the dup logic, plus the browser run below (31/31).
@@ -90,7 +114,9 @@ Overall (at audit time): **B+ — "a senior engineer built this, but the main fi
 **Tier 4b — ✅ DONE (2026-09-03):** multi-device sync (Elizabeth confirmed she uses PackPal across devices). **Manual check after deploy:** open the app on phone + laptop, pack an item on one → it should appear packed on the other within a couple of seconds without a reload; pack different items on both at once → both end up packed on both.
 **Tier 4c — ✅ DONE (2026-09-03):** leaf components extracted (see the structure section). **The audit is fully closed.** Optional later: extract `OutTheDoor` then `OutfitBuilder` one at a time with both harnesses after each; prune `weatherData.forecast` per trip to cut blob size (data-shape change → migration); index keys / inline hexes.
 
-Also outstanding: run `get_runtime_errors` on the Vercel project; commit + push this session's work.
+**UX batch — ✅ BUILT + VERIFIED (2026-09-03):** see the UX batch section; the three manual live-site checks listed there are the only follow-up. Commit + web-upload pending at the time of writing (this line gets updated once it is on GitHub).
+
+Also outstanding: run `get_runtime_errors` on the Vercel project.
 
 ## Git note
 This repo pushes through a per-repo alias because the machine has two GitHub accounts + an `insteadOf` SSH rewrite. Use **`git pushpp`** (defined in `.git/config`) to push as `elizabethsdavis`. Plain `git push` fails with "denied to elizabeth-davis-dd."

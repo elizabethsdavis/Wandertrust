@@ -32,8 +32,10 @@ and **lights up cloud features when configured**. The guiding principles:
   components/                      lib/  (logic)                  data/  (facts)
   AuthGate, Account,        theme, utils, weather,        taxonomy, catalog,
   Onboarding                packing, auth, store,         recommendations,
-                            passkey, firebase,            content, history
-                            importHist
+                            passkey, firebase,            content, history,
+                            importHist, localMirror,      otdDefaults
+                            merge, migrations, template,
+                            reorder, exportList, wardrobe
                                       │
                                       ▼
                             Firebase (Auth · Firestore · Functions)
@@ -49,7 +51,7 @@ keep the graph honest.
 | File | Holds |
 |------|-------|
 | `taxonomy.js` | `TRIP_TYPES`, `TEMP_RANGES`, `CATEGORIES` — the controlled vocabularies (imports color tokens from `theme`). |
-| `catalog.js` | `CORE` (the 22-trip packing catalog with frequency/essential/forgotten flags) + `COND_ITEMS` (trip-type add-ons). |
+| `catalog.js` | `CORE` (the 22-trip packing catalog with frequency/essential/forgotten flags; categories `activewear`, `necessities`, `health`, `tech`, `toiletries`, `checkout`) + `COND_ITEMS` (trip-type add-ons). |
 | `recommendations.js` | `TEMP_RECS` (by temperature band) + `SMART_RECS` (by trip type). |
 | `content.js` | `UNFREEZE_STEPS` + `AFFIRMATIONS` — Freak Out mode copy. |
 | `history.js` | `HIST_TRIPS` — the 22 historical trips (also the onboarding starter import). |
@@ -69,17 +71,27 @@ keep the graph honest.
 | `importHist.js` | Converts `HIST_TRIPS` → editable trips for onboarding import. |
 | `localMirror.js` | The `pp2_*` localStorage mirror: read/write/clear + the `pp2_owner` uid tag. |
 | `merge.js` | `mergeState(base, local, remote)` — pure three-way merge used for multi-device sync. |
+| `migrations.js` | `migrateTrip()` / `migrateTemplate()` — idempotent load-time migrations of persisted data (checkout → OTD, necessities → health, Clothing → Tops/Bottoms via `slotToSection()`). |
+| `template.js` | The packing template's pure logic: `templateBase()`, `expectedTemplateItems()`, `diffTripAgainstTemplate()`, `applyTemplateChanges()`, the `FLAGS` (refill / charge / laundry). |
+| `reorder.js` | `moveSection()` / `moveItem()` — rebuild `trip.items` for Arrange mode (order *is* array order). |
+| `exportList.js` | `tripToMarkdown()` / `markdownFileName()` — the shareable Markdown checklist. |
+| `wardrobe.js` | `parseItemMeta()` (colour family + shade + two-tone, pattern, brand from capitalization / known brands), `swatchBackground()`, `colorToHex()`; manual overrides come from the `wardrobeMeta` key. |
 
 ### `src/components/` — presentational + flow screens
 Flow screens: `AuthGate.jsx` (phone → OTP → passkey sign-in), `Account.jsx`
 (account sheet: sync status, storage, passkey, sign out), `Onboarding.jsx`
-(one-time setup + import), `TemplateEditor.jsx` (editable packing template).
+(one-time setup + import), `TemplateEditor.jsx` (editable packing template with
+per-item refill / charge / laundry toggles), `TemplateSync.jsx` ("Save to
+template": diff the open trip against the template, tick, apply).
 
 Props-only leaf components (no store access; extracted from `PackPal.jsx`):
 `ui.jsx` (`ProgressRing`, `Btn`, `MiniBar`), `PackList.jsx` (`PackItem`,
 `PackSection`), `celebration.jsx` (`useCelebration` → confetti + toast),
 `FreakOutMode.jsx`, `GuidedPack.jsx` (Focus Pack), `FocusRefill.jsx`,
-`FocusCharge.jsx`, `SmartRecsView.jsx`, `Insights.jsx`, `GlobalOtdEditor.jsx`.
+`FocusCharge.jsx`, `FocusLaundry.jsx`, `SmartRecsView.jsx`, `Insights.jsx`,
+`GlobalOtdEditor.jsx`, `ShareSheet.jsx` (copy / native share / download the
+Markdown export), `ArrangeList.jsx` (dnd-kit drag-and-drop of sections and
+items), `WardrobeMetaPicker.jsx` (fix a wardrobe item's colour / brand).
 
 ### `src/PackPal.jsx` — the application
 State, CRUD, view routing, and the views that are wired tightly into trip state:
@@ -136,7 +148,10 @@ checks it and falls back cleanly.
 map over the data.
 
 **Add a packing category** → add to `CATEGORIES` in `data/taxonomy.js`, then add
-items under that category id in `CORE` (`data/catalog.js`).
+items under that category id in `CORE` (`data/catalog.js`). Moving *existing*
+sections between categories is a persisted-data change: add a step to
+`lib/migrations.js` (as the `health` split did) so old trips and a stored
+template follow.
 
 **Add catalog items** → edit `CORE` in `data/catalog.js`. Set `f` (0–1
 frequency), `e` (essential), `ff` (frequently forgotten), `cond` (trip types).
@@ -146,7 +161,8 @@ frequency), `e` (essential), `ff` (frequently forgotten), `cond` (trip types).
 trip type) in `data/recommendations.js`.
 
 **Add a persisted setting** → call `usePersist("newKey", default)` anywhere in
-the tree under `StoreProvider`. It syncs with zero extra code.
+the tree under `StoreProvider`, and add the key to `KNOWN_KEYS` in
+`lib/localMirror.js` so the offline mirror keeps it too.
 
 **Swap the backend** → reimplement `lib/firebase.js`, `lib/auth.jsx`,
 `lib/store.jsx`, and `lib/passkey.js` against the new provider, keeping their
@@ -168,7 +184,7 @@ The props-only leaf components are out of `src/PackPal.jsx` (3.5k → 2.3k lines
 What remains in-file is deliberate: `OutTheDoor` and `OutfitBuilder` reach into
 trip state and callbacks in ways the leaf components don't, and the audit flagged
 them as the risky extractions. Move them one at a time, and after each move run
-**both** harnesses — `scripts/browser-checks.py` (local mode, 36 checks, with
+**both** harnesses — `scripts/browser-checks.py` (local mode, 61 checks, with
 screenshots you can pixel-diff against the previous run) and
 `scripts/cloud-checks.py` (cloud mode, 40 checks). Smaller nits still open:
 a few lists keyed by array index, and recurring inline hexes that could become
