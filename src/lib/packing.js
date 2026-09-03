@@ -1,11 +1,15 @@
-import { CORE, COND_ITEMS } from "../data/catalog";
+import { CORE } from "../data/catalog";
 import { id } from "./utils";
+import { addinItemsFor } from "./addins";
 
 // Pure domain logic for building and classifying packing lists.
 
-// Generate a personalized list from the core catalog + conditional add-ons,
-// filtered by trip type and length.
-export function genList(types, days, coreOverride) {
+// Generate a personalized list from the core catalog + add-ins, filtered by
+// trip type and length.
+//   coreOverride  the user's edited template (null → built-in CORE)
+//   opts.addins   the user's edited add-ins (null → built-in COND_ITEMS)
+//   opts.tempRange / opts.conditions   pick the weather add-ins ("rain", "snow")
+export function genList(types, days, coreOverride, opts = {}) {
   const items = [];
   const ts = Array.isArray(types) ? types : [types];
   // Use the user's edited template when present, else the built-in catalog.
@@ -26,15 +30,10 @@ export function genList(types, days, coreOverride) {
       });
     });
   });
-  ts.forEach((t) => {
-    if (COND_ITEMS[t]) {
-      Object.entries(COND_ITEMS[t]).forEach(([sec, arr]) => {
-        const cat = t === "ski" || t === "beach" ? "activewear" : "necessities";
-        arr.forEach((name) => {
-          items.push({ id: id(), name, category: cat, section: sec, packed: false, essential: false, ff: false, freq: 0.7, needsRefill: false, needsCharge: false });
-        });
-      });
-    }
+  // Add-ins: trip-type groups (ski gear, international prep, …) then weather groups.
+  addinItemsFor(opts.addins, { tripTypes: ts, tempRange: opts.tempRange, conditions: opts.conditions }).forEach((a) => {
+    items.push({ id: id(), name: a.name, category: a.category, section: a.section, packed: false, essential: a.e, ff: a.ff, freq: 0.7,
+      needsRefill: a.needsRefill, needsCharge: a.needsCharge, needsWash: a.needsWash });
   });
   return items;
 }

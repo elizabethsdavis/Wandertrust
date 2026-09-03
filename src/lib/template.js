@@ -104,3 +104,32 @@ export function applyTemplateChanges(template, diff, selectedIds) {
   }
   return next;
 }
+
+// ── Group editing helpers (a "group" is { [section]: [items] } — one template
+//    category, or one add-in group). Section order = object key order (JSON keeps
+//    it), item order = array order; genList follows both, so reordering here is
+//    all a new trip needs. All return new objects.
+
+function reorderKeys(obj, from, to) {
+  const keys = Object.keys(obj);
+  if (from < 0 || to < 0 || from >= keys.length || to >= keys.length || from === to) return obj;
+  const [k] = keys.splice(from, 1);
+  keys.splice(to, 0, k);
+  return Object.fromEntries(keys.map((x) => [x, obj[x]]));
+}
+
+/** Move section `name` to position `toIndex` within the group. */
+export function moveGroupSection(group, name, toIndex) {
+  const from = Object.keys(group || {}).indexOf(name);
+  return from < 0 ? group : reorderKeys(group, from, toIndex);
+}
+
+/** Move the item at `fromIndex` in `section` to `toIndex`. */
+export function moveGroupItem(group, section, fromIndex, toIndex) {
+  const arr = group?.[section];
+  if (!arr || fromIndex < 0 || toIndex < 0 || fromIndex >= arr.length || toIndex >= arr.length || fromIndex === toIndex) return group;
+  const next = arr.slice();
+  const [it] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, it);
+  return { ...group, [section]: next };
+}

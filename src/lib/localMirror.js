@@ -12,7 +12,7 @@ const OWNER_KEY = LS_PREFIX + "owner";
 
 // Every usePersist key. readLocal() only restores keys listed here, so a new
 // key MUST be added or it silently drops out of the offline / local-mode mirror.
-export const KNOWN_KEYS = ["trips", "wardrobe", "customOccasions", "otdItems", "catalogTemplate", "wardrobeMeta"];
+export const KNOWN_KEYS = ["trips", "wardrobe", "customOccasions", "otdItems", "catalogTemplate", "wardrobeMeta", "addins"];
 
 export function readLocal() {
   const data = {};
