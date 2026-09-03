@@ -16,7 +16,22 @@ function syncMeta(syncState) {
 
 export default function AccountBadge() {
   const { user, isLocal, signOut } = useAuth();
-  const { syncState } = useStoreMeta();
+  const { syncState, flush } = useStoreMeta();
+  const [signingOut, setSigningOut] = useState(false);
+
+  // Sign-out wipes the local mirror, so push anything unsaved first and let the
+  // user back out if the cloud can't be reached.
+  const doSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      const synced = await flush();
+      if (!synced && !confirm("Some changes haven't synced to the cloud yet and will be lost if you sign out now. Sign out anyway?")) return;
+      await signOut();
+    } finally {
+      setSigningOut(false);
+    }
+  };
   const [open, setOpen] = useState(false);
   const [pkBusy, setPkBusy] = useState(false);
   const [pkMsg, setPkMsg] = useState("");
@@ -113,12 +128,12 @@ export default function AccountBadge() {
                 )}
 
                 {/* Sign out */}
-                <button onClick={signOut}
-                  style={{ width: "100%", minHeight: 52, borderRadius: 14, cursor: "pointer",
+                <button onClick={doSignOut} disabled={signingOut}
+                  style={{ width: "100%", minHeight: 52, borderRadius: 14, cursor: signingOut ? "default" : "pointer",
                     border: `1px solid rgba(199,91,91,.25)`, background: C.dangerGlow,
                     display: "flex", alignItems: "center", gap: 12, padding: "0 16px",
                     fontFamily: F.body, fontSize: 14.5, fontWeight: 600, color: C.danger }}>
-                  <LogOut size={18} /> Sign out
+                  {signingOut ? <Loader size={18} className="spin" /> : <LogOut size={18} />} {signingOut ? "Signing out…" : "Sign out"}
                 </button>
               </>
             )}
