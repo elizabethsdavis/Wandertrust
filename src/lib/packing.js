@@ -14,7 +14,10 @@ export function genList(types, days, coreOverride) {
     if (catId === "checkout") return; // OTD items handled separately via trip.otdItems
     Object.entries(sections).forEach(([sec, arr]) => {
       arr.forEach((it) => {
-        if (it.cond && !it.cond.some((t) => ts.includes(t)) && it.f < 0.5) return;
+        // A `cond` item only belongs on the trip types it lists — regardless of how
+        // often it was packed historically. (The old `&& it.f < 0.5` let high-frequency
+        // cond items like Passport / Corporate badge leak onto every trip.)
+        if (it.cond && !it.cond.some((t) => ts.includes(t))) return;
         if (it.f >= 0.3 || (days > 5 && it.f >= 0.2)) {
           items.push({ id: id(), name: it.name, category: catId, section: sec, packed: false, essential: !!it.e, ff: !!it.ff, freq: it.f, needsRefill: false, needsCharge: false });
         }
