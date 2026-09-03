@@ -4,7 +4,7 @@ import { usePersist } from "./lib/store";
 import AccountBadge from "./components/Account";
 import TemplateEditor from "./components/TemplateEditor";
 import { C, F } from "./lib/theme";
-import { id, haptic } from "./lib/utils";
+import { id, haptic, lastGrapheme } from "./lib/utils";
 import { fetchWeather } from "./lib/weather";
 import { genList, genTripOtd, tempToRange } from "./lib/packing";
 import { TRIP_TYPES, TEMP_RANGES, CATEGORIES } from "./data/taxonomy";
@@ -1808,10 +1808,14 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, customOccasions, setCustom
     setTimeout(() => setSaveFlash(""), 1500);
     onSave(occasions, dayNames, true, dayEmojiMap);
     haptic("success");
-    // Check if this outfit had all slots filled
+    // Celebrate a substantially complete outfit (3+ real slots filled). Uses the
+    // module-level OUTFIT_SLOTS — a local shadow used to list a non-existent
+    // `jewelry` slot and ignored the multi-select accessory slots entirely.
     if (editing && currentOccasion) {
-      const OUTFIT_SLOTS = [{ id: "top" }, { id: "bottom" }, { id: "shoes" }, { id: "layer" }, { id: "bag" }, { id: "jewelry" }];
-      const filledSlots = OUTFIT_SLOTS.filter(s => currentOccasion.slots?.[s.id]);
+      const filledSlots = OUTFIT_SLOTS.filter(s => {
+        const v = currentOccasion.slots?.[s.id];
+        return Array.isArray(v) ? v.length > 0 : !!v;
+      });
       if (filledSlots.length >= 3) celebrate?.("outfitDone", "medium");
     }
     setEditing(null);
@@ -1891,7 +1895,7 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, customOccasions, setCustom
                 display: "flex", alignItems: "center", gap: 6 }}>
                 {editingDayEmoji === di ? (
                   <span style={{ position: "relative" }}>
-                    <input value={dayEmojiVal} onChange={e => setDayEmojiVal(e.target.value.slice(-2))}
+                    <input value={dayEmojiVal} onChange={e => setDayEmojiVal(lastGrapheme(e.target.value))}
                       autoFocus
                       onBlur={() => {
                         if (dayEmojiVal) setDayEmojiMap(prev => ({ ...prev, [di]: dayEmojiVal }));
@@ -1956,7 +1960,7 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, customOccasions, setCustom
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontFamily: F.body, fontSize: 13, fontWeight: 500, color: C.charcoal, marginBottom: 2, display: "flex", alignItems: "center", gap: 4 }}>
                             {editingOccEmoji && editingOccEmoji.dayIdx === di && editingOccEmoji.occIdx === oi ? (
-                              <input value={occEmojiVal} onChange={e => setOccEmojiVal(e.target.value.slice(-2))}
+                              <input value={occEmojiVal} onChange={e => setOccEmojiVal(lastGrapheme(e.target.value))}
                                 autoFocus
                                 onClick={e => e.stopPropagation()}
                                 onBlur={() => {
@@ -2129,7 +2133,7 @@ function OutfitBuilder({ trip, wardrobe, setWardrobe, customOccasions, setCustom
                       {emojiPickerOpen && (
                         <div style={{ marginBottom: 10 }}>
                           <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
-                            <input value={newTypeEmoji} onChange={e => { const v = e.target.value; setNewTypeEmoji(v.slice(-2)); }}
+                            <input value={newTypeEmoji} onChange={e => setNewTypeEmoji(lastGrapheme(e.target.value))}
                               placeholder="Type any emoji..."
                               style={{ flex: 1, fontFamily: F.body, fontSize: 18, padding: "6px 10px", textAlign: "center",
                                 border: `1.5px solid ${C.borderMedium}`, borderRadius: 8, background: C.warmWhite,
@@ -2640,8 +2644,21 @@ export default function PackPal() {
     if (activeTrip?.id === tid) { setActiveTrip(null); setView("home"); }
   };
   const dupTrip = (trip) => {
-    const ni = trip.items.map(i => ({ ...i, id: id(), packed: false, needsRefill: false, needsCharge: false }));
-    const d = { ...trip, id: id(), items: ni, createdAt: new Date().toISOString(), destination: `${trip.destination} (copy)` };
+    // Fresh item ids + every progress flag cleared (packed / refill / charge).
+    const ni = trip.items.map(i => ({ ...i, id: id(), packed: false, needsRefill: false, needsCharge: false, refilled: false, charged: false }));
+    // Keep the outfit plan (a copy of a trip wants the same outfits) but deep-copy it
+    // with fresh occasion ids so the two trips never share objects or ids.
+    const outfitPlan = Array.isArray(trip.outfitPlan)
+      ? trip.outfitPlan.map(day => (day || []).map(occ => ({ ...occ, id: id(), slots: JSON.parse(JSON.stringify(occ.slots || {})) })))
+      : undefined;
+    const d = {
+      ...trip, id: id(), items: ni,
+      otdChecked: {}, // Out-the-Door progress belongs to the original trip, not the copy
+      ...(outfitPlan ? { outfitPlan } : {}),
+      ...(Array.isArray(trip.outfitDayNames) ? { outfitDayNames: [...trip.outfitDayNames] } : {}),
+      ...(trip.dayEmojis ? { dayEmojis: { ...trip.dayEmojis } } : {}),
+      createdAt: new Date().toISOString(), destination: `${trip.destination} (copy)`,
+    };
     setTrips(p => [d, ...p]); setActiveTrip(d); setView("trip");
   };
 
