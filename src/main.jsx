@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from "./lib/auth";
 import { StoreProvider } from "./lib/store";
 import AuthGate from "./components/AuthGate";
 import Onboarding from "./components/Onboarding";
+import UpdateBanner from "./components/UpdateBanner";
 
 function Splash() {
   return (
@@ -32,6 +33,7 @@ function Gate() {
   return (
     <StoreProvider>
       {needsOnboarding ? <Onboarding /> : <PackPal />}
+      <UpdateBanner />
     </StoreProvider>
   );
 }

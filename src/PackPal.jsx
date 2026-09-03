@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { Search, Plus, Check, ChevronRight, Sparkles, ArrowLeft, X, Clock, Zap, WashingMachine, ChevronsDownUp, ChevronsUpDown, Share2, GripVertical, Save, RotateCcw, Trash2, Copy, Brain, BarChart3, Timer, Shield, RefreshCw, Thermometer, CloudRain, Eye, Star, Loader, Shirt, Gem, Watch, Footprints, ShoppingBag, Palette, ChevronLeft, DoorOpen, Edit3, BatteryCharging } from "lucide-react";
+import { Search, Plus, Check, ChevronRight, Sparkles, ArrowLeft, X, Clock, Zap, WashingMachine, ChevronsDownUp, ChevronsUpDown, Share2, GripVertical, Save, RotateCcw, Trash2, Copy, Brain, BarChart3, Timer, Shield, RefreshCw, Thermometer, CloudRain, Eye, Star, Loader, Shirt, Gem, Watch, Footprints, ShoppingBag, Palette, ChevronLeft, DoorOpen, Edit3, BatteryCharging, RotateCw, Lock, Unlock } from "lucide-react";
 import { usePersist, useStoreMeta } from "./lib/store";
 import AccountBadge from "./components/Account";
 import TemplateEditor from "./components/TemplateEditor";
@@ -25,6 +25,9 @@ import { parseItemMeta, swatchBackground } from "./lib/wardrobe";
 import { WardrobeMetaPicker } from "./components/WardrobeMetaPicker";
 import { DEFAULT_OTD_ITEMS } from "./data/otdDefaults";
 import { migrateTrip, migrateTemplate, slotToSection } from "./lib/migrations";
+import { reloadApp } from "./lib/version";
+import { isPastTrip, endedLabel } from "./lib/tripStatus";
+import { CONDITIONS, detectConditions } from "./lib/addins";
 import { GlobalOtdEditor } from "./components/GlobalOtdEditor";
 import { SmartRecsView } from "./components/SmartRecsView";
 import { Insights } from "./components/Insights";
@@ -1293,14 +1296,19 @@ export default function PackPal() {
   const [otdItems, setOtdItems] = usePersist("otdItems", DEFAULT_OTD_ITEMS);
   const [editGlobalOtd, setEditGlobalOtd] = useState(false);
   const [catalogTemplate, setCatalogTemplate] = usePersist("catalogTemplate", null);
+  const [addins, setAddins] = usePersist("addins", null); // trip-type / weather add-ins (additive key; null = built-in COND_ITEMS)
   const [editTemplate, setEditTemplate] = useState(false);
+  // Full-screen views swap in place, so start each one at the top instead of wherever Home was scrolled to.
+  useEffect(() => { window.scrollTo(0, 0); }, [view, editTemplate, editGlobalOtd, templateSync, activeTripId]);
+  // Past trips (over for a week+) open read-only; "Unlock" lifts that for this session only.
+  const [unlockedIds, setUnlockedIds] = useState(() => new Set());
 
   // Migrations (see ./lib/migrations): checkout → OTD, Health & Wellness relabel,
   // Clothing → Tops/Bottoms. Idempotent: only writes when something actually changes.
   // Timing (audit B6): StoreProvider renders a splash until the cloud blob has loaded, so
   // this component never mounts with stale/empty `trips`; the `ready` gate makes that
   // invariant explicit instead of relying on the splash.
-  const { ready: storeReady } = useStoreMeta();
+  const { ready: storeReady, flush: flushStore } = useStoreMeta();
   useEffect(() => {
     if (!storeReady) return;
     let changed = false;
@@ -1326,7 +1334,7 @@ export default function PackPal() {
 
   // Wizard
   const [wStep, setWStep] = useState(0);
-  const [nTrip, setNTrip] = useState({ destination: "", tripType: [], days: 4, weather: "warm", startDate: "", tempRange: "" });
+  const [nTrip, setNTrip] = useState({ destination: "", tripType: [], days: 4, weather: "warm", startDate: "", tempRange: "", conditions: [] });
   const [weatherData, setWeatherData] = useState(null);
   const [weatherLoading, setWeatherLoading] = useState(false);
 
@@ -1338,21 +1346,21 @@ export default function PackPal() {
     setWeatherData(data);
     if (data?.forecast?.length) {
       const avgMax = Math.round(data.forecast.reduce((s, d) => s + d.maxF, 0) / data.forecast.length);
-      setNTrip(prev => ({ ...prev, tempRange: tempToRange(avgMax) }));
+      setNTrip(prev => ({ ...prev, tempRange: tempToRange(avgMax), conditions: detectConditions(data) }));
     }
     setWeatherLoading(false);
   };
 
   // ── CRUD ──
   const createTrip = () => {
-    const items = genList(nTrip.tripType, nTrip.days, catalogTemplate);
+    const items = genList(nTrip.tripType, nTrip.days, catalogTemplate, { addins, tempRange: nTrip.tempRange, conditions: nTrip.conditions || [] });
     const tripOtd = genTripOtd(otdItems, nTrip.tripType);
     const trip = { id: id(), ...nTrip, items, otdItems: tripOtd, otdChecked: {}, createdAt: new Date().toISOString(),
       icon: TRIP_TYPES.find(t => t.id === nTrip.tripType[0])?.icon || "✈️", weatherData };
     setTrips(p => [trip, ...p]);
     setActiveTripId(trip.id);
     setView("trip");
-    setNTrip({ destination: "", tripType: [], days: 4, weather: "warm", startDate: "", tempRange: "" });
+    setNTrip({ destination: "", tripType: [], days: 4, weather: "warm", startDate: "", tempRange: "", conditions: [] });
     setWStep(0); setWeatherData(null);
   };
 
@@ -1652,7 +1660,7 @@ export default function PackPal() {
           ))}
 
           <Btn v="primary" sz="md" onClick={() => {
-            setNTrip({ destination: histTrip.dest, tripType: [histTrip.type], days: histTrip.days, weather: "warm", startDate: "", tempRange: "" });
+            setNTrip({ destination: histTrip.dest, tripType: [histTrip.type], days: histTrip.days, weather: "warm", startDate: "", tempRange: "", conditions: [] });
             setWStep(1); setView("new-trip");
           }} style={{ width: "100%", marginTop: 12 }}>
             <Copy size={15} /> Pack for {histTrip.dest} again
@@ -1816,6 +1824,30 @@ export default function PackPal() {
                 </button>
               ))}
             </div>
+
+            {/* Rain / snow — auto-ticked from the forecast, toggleable; picks the matching add-ins */}
+            <div style={{ fontFamily: F.body, fontSize: 12, fontWeight: 600, textTransform: "uppercase",
+              letterSpacing: ".06em", color: C.warmGray, margin: "20px 0 10px" }}>
+              Conditions
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              {CONDITIONS.map(c => {
+                const on = (nTrip.conditions || []).includes(c.id);
+                return (
+                  <button key={c.id} aria-pressed={on}
+                    onClick={() => setNTrip(p => ({ ...p, conditions: on ? (p.conditions || []).filter(x => x !== c.id) : [...(p.conditions || []), c.id] }))}
+                    style={{ flex: 1, padding: "12px 14px", borderRadius: 14, textAlign: "left", cursor: "pointer",
+                      border: `1.5px solid ${on ? c.color : C.borderLight}`, background: on ? `${c.color}12` : C.warmWhite,
+                      display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 20 }}>{c.icon}</span>
+                    <div>
+                      <div style={{ fontFamily: F.body, fontSize: 13, fontWeight: on ? 600 : 400, color: C.charcoal }}>{c.label}</div>
+                      <div style={{ fontFamily: F.body, fontSize: 11, color: C.softGray }}>{on ? "adds your " + c.short.toLowerCase() + " add-ins" : "tap if the forecast says so"}</div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>)}
 
           {/* Step 4: Review */}
@@ -1829,6 +1861,7 @@ export default function PackPal() {
               <div style={{ fontFamily: F.body, fontSize: 14, color: C.warmGray, marginBottom: 16 }}>
                 {nTrip.days} days
                 {nTrip.tempRange && ` · ${TEMP_RANGES.find(t => t.id === nTrip.tempRange)?.icon} ${TEMP_RANGES.find(t => t.id === nTrip.tempRange)?.label}`}
+                {(nTrip.conditions || []).map(c => ` · ${CONDITIONS.find(x => x.id === c)?.icon} ${CONDITIONS.find(x => x.id === c)?.short}`).join("")}
                 {nTrip.startDate && ` · ${new Date(nTrip.startDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`}
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -1868,6 +1901,7 @@ export default function PackPal() {
   // ═══ TRIP VIEW ═══
   if (view === "trip" && activeTrip) {
     const st = stats(activeTrip);
+    const locked = isPastTrip(activeTrip) && !unlockedIds.has(activeTrip.id);
     let fitems = activeTrip.items;
     if (searchQ) { const q = searchQ.toLowerCase(); fitems = fitems.filter(i => i.name.toLowerCase().includes(q) || i.section.toLowerCase().includes(q)); }
     if (catFilter) fitems = fitems.filter(i => i.category === catFilter);
@@ -1919,29 +1953,48 @@ export default function PackPal() {
             </div>
           </div>
 
+          {/* ── Past trip: read-only (Share / Save to template / Duplicate / Delete still work) ── */}
+          {locked && (
+            <div role="status" style={{ marginTop: 18, background: C.creamDark, borderRadius: 14, padding: "12px 14px",
+              display: "flex", alignItems: "center", gap: 10, border: `1px solid ${C.borderLight}` }}>
+              <Lock size={15} color={C.warmGray} />
+              <div style={{ flex: 1, fontFamily: F.body, fontSize: 13, color: C.warmGray, lineHeight: 1.4 }}>
+                <strong style={{ color: C.charcoal }}>{endedLabel(activeTrip) || "Past trip"}</strong> — this list is read-only now.
+                You can still share it, save its edits to your template, or duplicate it for a new trip.
+              </div>
+              <button onClick={() => setUnlockedIds(prev => new Set([...prev, activeTrip.id]))}
+                style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 12px", borderRadius: 10, flexShrink: 0, cursor: "pointer",
+                  border: `1px solid ${C.borderMedium}`, background: C.warmWhite, fontFamily: F.body, fontSize: 12, fontWeight: 600, color: C.charcoal }}>
+                <Unlock size={12} /> Unlock
+              </button>
+            </div>
+          )}
+
           {/* ── Primary Actions ── */}
-          <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
-            <Btn v="sage" sz="sm" onClick={() => setGuidedMode(true)} style={{ flex: 1 }}>
-              <Zap size={15} /> Focus Pack
-            </Btn>
-            <Btn v="primary" sz="sm" onClick={() => setOutfitMode(true)} style={{ flex: 1 }}>
-              <Shirt size={15} /> Build Outfits
-            </Btn>
-          </div>
+          {!locked && (
+            <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
+              <Btn v="sage" sz="sm" onClick={() => setGuidedMode(true)} style={{ flex: 1 }}>
+                <Zap size={15} /> Focus Pack
+              </Btn>
+              <Btn v="primary" sz="sm" onClick={() => setOutfitMode(true)} style={{ flex: 1 }}>
+                <Shirt size={15} /> Build Outfits
+              </Btn>
+            </div>
+          )}
 
           {/* ── Quick Actions ── */}
           <div style={{ display: "flex", gap: 6, marginTop: 12, overflowX: "auto", paddingBottom: 2 }}>
             {[
-              { label: "Out the Door", icon: <DoorOpen size={14} />, action: () => setOutTheDoor(true), color: C.copper },
-              { label: "Share", icon: <Share2 size={14} />, action: () => setShareOpen(true), color: C.copper },
-              { label: "Save to template", icon: <Save size={14} />, action: () => setTemplateSync(true), color: C.sage },
-              { label: arrangeMode ? "Done arranging" : "Arrange", icon: <GripVertical size={14} />, action: () => setArrangeMode(a => !a), color: arrangeMode ? C.sage : C.copper },
-              { label: "Smart Recs", icon: <Sparkles size={14} />, action: () => setShowRecs(true), color: C.copper },
-              { label: "Freak Out", icon: <Brain size={14} />, action: () => setFreakOut(true), color: C.copper },
+              { label: "Out the Door", icon: <DoorOpen size={14} />, action: () => setOutTheDoor(true), color: C.copper, whenLocked: false },
+              { label: "Share", icon: <Share2 size={14} />, action: () => setShareOpen(true), color: C.copper, whenLocked: true },
+              { label: "Save to template", icon: <Save size={14} />, action: () => setTemplateSync(true), color: C.sage, whenLocked: true },
+              { label: arrangeMode ? "Done arranging" : "Arrange", icon: <GripVertical size={14} />, action: () => setArrangeMode(a => !a), color: arrangeMode ? C.sage : C.copper, whenLocked: false },
+              { label: "Smart Recs", icon: <Sparkles size={14} />, action: () => setShowRecs(true), color: C.copper, whenLocked: false },
+              { label: "Freak Out", icon: <Brain size={14} />, action: () => setFreakOut(true), color: C.copper, whenLocked: false },
               { label: "Reset", icon: <RotateCcw size={13} />, action: () => {
                 setTrips(p => p.map(t => t.id === activeTrip.id ? { ...t, items: t.items.map(i => ({ ...i, packed: false })) } : t));
-              }, color: C.softGray },
-            ].map(({ label, icon, action, color }) => (
+              }, color: C.softGray, whenLocked: false },
+            ].filter(a => !locked || a.whenLocked).map(({ label, icon, action, color }) => (
               <button key={label} onClick={action} style={{ display: "flex", alignItems: "center", gap: 5,
                 padding: "6px 14px", borderRadius: 10, whiteSpace: "nowrap", cursor: "pointer",
                 background: C.warmWhite, border: `1px solid ${C.borderLight}`,
@@ -1953,7 +2006,7 @@ export default function PackPal() {
           </div>
 
           {/* ── Trip Prep ── */}
-          {(() => {
+          {!locked && (() => {
             const hasRefills = refillCount > 0;
             const hasCharges = chargeItemCount > 0;
             const hasWashes = washItemCount > 0;
@@ -2059,7 +2112,7 @@ export default function PackPal() {
           )}
         </div>
 
-        {arrangeMode ? (
+        {arrangeMode && !locked ? (
           <ArrangeList items={activeTrip.items} onReorder={(next) => reorderItems(activeTrip.id, next)} onDone={() => setArrangeMode(false)} />
         ) : (<>
         {/* Search & Filter */}
@@ -2151,7 +2204,7 @@ export default function PackPal() {
                       background: acColor, color: "#fff", fontFamily: F.body, fontSize: 11,
                       fontWeight: 600, cursor: "pointer" }}>Add</button>
                   </form>
-                ) : (
+                ) : !locked && (
                   <button onClick={() => { setAddingSec(catFilter); setNewSecName(""); }}
                     style={{ padding: "5px 10px", borderRadius: 8, whiteSpace: "nowrap",
                       border: `1px dashed ${C.borderMedium}`,
@@ -2202,7 +2255,7 @@ export default function PackPal() {
                     <PackSection key={sec} title={sec} items={items}
                       onToggle={iid => toggle(activeTrip.id, iid)} onRemove={iid => removeItem(activeTrip.id, iid)}
                       onAddItem={name => addItem(activeTrip.id, sec, cat.id, name)}
-                      readOnly={false} refillMode={refillMode}
+                      readOnly={locked} refillMode={refillMode}
                       onToggleRefill={iid => toggleRefill(activeTrip.id, iid)}
                       onToggleRefilled={iid => toggleRefilled(activeTrip.id, iid)}
                       chargeMode={chargeMode}
@@ -2213,7 +2266,7 @@ export default function PackPal() {
                       onToggleWashed={iid => toggleWashed(activeTrip.id, iid)}
                       forceOpen={sectionsForce} />
                   ))}
-                  {!refillMode && !chargeMode && !washMode && (
+                  {!refillMode && !chargeMode && !washMode && !locked && (
                     addingSec === cat.id && !catFilter ? (
                       <form onSubmit={e => { e.preventDefault(); addSection(cat.id, newSecName); }}
                         style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px" }}>
@@ -2314,7 +2367,7 @@ export default function PackPal() {
 
   // ═══ PACKING TEMPLATE EDITOR ═══
   if (editTemplate) {
-    return <TemplateEditor template={catalogTemplate} setTemplate={setCatalogTemplate} onExit={() => setEditTemplate(false)} />;
+    return <TemplateEditor template={catalogTemplate} setTemplate={setCatalogTemplate} addins={addins} setAddins={setAddins} onExit={() => setEditTemplate(false)} />;
   }
 
   // ═══ HOME ═══
@@ -2325,7 +2378,15 @@ export default function PackPal() {
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 8 }}>
           <div style={{ fontFamily: F.body, fontSize: 12, fontWeight: 600, textTransform: "uppercase",
             letterSpacing: ".12em", color: C.copper }}>PackPal</div>
-          <AccountBadge />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {/* Reload — the Home Screen "app" has no address bar to refresh from */}
+            <button onClick={() => reloadApp(flushStore)} aria-label="Reload app" title="Reload app"
+              style={{ width: 40, height: 40, borderRadius: "50%", border: `1px solid ${C.borderLight}`, background: C.warmWhite,
+                cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: `0 1px 4px ${C.shadow}` }}>
+              <RotateCw size={17} color={C.warmGray} />
+            </button>
+            <AccountBadge />
+          </div>
         </div>
         <h1 style={{ fontFamily: F.display, fontSize: 40, color: C.charcoal, fontWeight: 400, margin: 0, lineHeight: 1.15 }}>
           Pack smarter,<br />not harder.
@@ -2339,39 +2400,50 @@ export default function PackPal() {
         </div>
       </div>
 
-      {/* Active trips */}
-      {trips.length > 0 && (
-        <div style={{ padding: "0 20px 24px" }}>
-          <div style={{ fontFamily: F.body, fontSize: 12, fontWeight: 600, textTransform: "uppercase",
-            letterSpacing: ".08em", color: C.warmGray, padding: "20px 8px 12px" }}>Your trips</div>
-          <div style={{ display: "grid", gap: 12 }}>
-            {trips.map(trip => {
-              const st = stats(trip);
-              return (
-                <button key={trip.id} onClick={() => { setActiveTripId(trip.id); setView("trip"); }}
-                  style={{ display: "flex", alignItems: "center", gap: 16, padding: "18px 20px", borderRadius: 18,
-                    background: C.warmWhite, border: `1px solid ${C.borderLight}`, cursor: "pointer",
-                    textAlign: "left", width: "100%", transition: "all .2s", boxShadow: `0 2px 8px ${C.shadow}` }}
-                  onMouseEnter={e => { e.currentTarget.style.boxShadow = `0 4px 16px ${C.shadowMed}`; e.currentTarget.style.transform = "translateY(-1px)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.boxShadow = `0 2px 8px ${C.shadow}`; e.currentTarget.style.transform = "translateY(0)"; }}>
-                  <ProgressRing pct={st.pct} size={52} sw={4}>
-                    <span style={{ fontSize: 20 }}>{trip.icon}</span>
-                  </ProgressRing>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontFamily: F.body, fontSize: 16, fontWeight: 500, color: C.charcoal }}>{trip.destination}</div>
-                    <div style={{ fontFamily: F.body, fontSize: 12, color: C.softGray, marginTop: 2 }}>
-                      {trip.days} days · {st.pk}/{st.tot} packed
-                    </div>
-                  </div>
-                  <div style={{ fontFamily: F.display, fontSize: 20, fontWeight: 500,
-                    color: st.pct === 100 ? C.sage : C.copper }}>{st.pct}%</div>
-                  <ChevronRight size={18} color={C.softGray} />
-                </button>
-              );
-            })}
+      {/* Trips — current ones first, then the ones that ended a week+ ago (read-only) */}
+      {trips.length > 0 && (() => {
+        const current = trips.filter(t => !isPastTrip(t));
+        const past = trips.filter(t => isPastTrip(t));
+        const card = (trip, isPast) => {
+          const st = stats(trip);
+          return (
+            <button key={trip.id} onClick={() => { setActiveTripId(trip.id); setView("trip"); }}
+              style={{ display: "flex", alignItems: "center", gap: 16, padding: "18px 20px", borderRadius: 18,
+                background: C.warmWhite, border: `1px solid ${C.borderLight}`, cursor: "pointer", opacity: isPast ? .85 : 1,
+                textAlign: "left", width: "100%", transition: "all .2s", boxShadow: `0 2px 8px ${C.shadow}` }}
+              onMouseEnter={e => { e.currentTarget.style.boxShadow = `0 4px 16px ${C.shadowMed}`; e.currentTarget.style.transform = "translateY(-1px)"; }}
+              onMouseLeave={e => { e.currentTarget.style.boxShadow = `0 2px 8px ${C.shadow}`; e.currentTarget.style.transform = "translateY(0)"; }}>
+              <ProgressRing pct={st.pct} size={52} sw={4}>
+                <span style={{ fontSize: 20 }}>{trip.icon}</span>
+              </ProgressRing>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontFamily: F.body, fontSize: 16, fontWeight: 500, color: C.charcoal }}>{trip.destination}</div>
+                <div style={{ fontFamily: F.body, fontSize: 12, color: C.softGray, marginTop: 2, display: "flex", alignItems: "center", gap: 5 }}>
+                  {isPast && <Lock size={11} />}
+                  {isPast ? `${endedLabel(trip)} · ${st.pk}/${st.tot} packed` : `${trip.days} days · ${st.pk}/${st.tot} packed`}
+                </div>
+              </div>
+              <div style={{ fontFamily: F.display, fontSize: 20, fontWeight: 500,
+                color: st.pct === 100 ? C.sage : C.copper }}>{st.pct}%</div>
+              <ChevronRight size={18} color={C.softGray} />
+            </button>
+          );
+        };
+        return (
+          <div style={{ padding: "0 20px 24px" }}>
+            {current.length > 0 && (<>
+              <div style={{ fontFamily: F.body, fontSize: 12, fontWeight: 600, textTransform: "uppercase",
+                letterSpacing: ".08em", color: C.warmGray, padding: "20px 8px 12px" }}>Your trips</div>
+              <div style={{ display: "grid", gap: 12 }}>{current.map(t => card(t, false))}</div>
+            </>)}
+            {past.length > 0 && (<>
+              <div style={{ fontFamily: F.body, fontSize: 12, fontWeight: 600, textTransform: "uppercase",
+                letterSpacing: ".08em", color: C.warmGray, padding: "20px 8px 12px" }}>Past trips</div>
+              <div style={{ display: "grid", gap: 12 }}>{past.map(t => card(t, true))}</div>
+            </>)}
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Quick actions */}
       <div style={{ padding: "0 20px 32px" }}>
@@ -2383,9 +2455,9 @@ export default function PackPal() {
             { label: "Insights", sub: "Patterns & tips", icon: <BarChart3 size={20} />, act: () => setView("insights"), col: C.sage },
             { label: "Freak Out Mode", sub: "ADHD support", icon: <Brain size={20} />, act: () => setFreakOut(true), col: C.lavender },
             { label: "Out the Door", sub: `${otdItems.length} default items`, icon: <DoorOpen size={20} />, act: () => setEditGlobalOtd(true), col: "#C17F59" },
-            { label: "Packing Template", sub: catalogTemplate ? "Customized" : "Default items", icon: <Edit3 size={20} />, act: () => setEditTemplate(true), col: C.sage },
+            { label: "Packing Template", sub: catalogTemplate || addins ? "Customized" : "Default items", icon: <Edit3 size={20} />, act: () => setEditTemplate(true), col: C.sage },
             { label: "Quick Pack", sub: "Weekend getaway", icon: <Timer size={20} />, act: () => {
-              setNTrip({ destination: "", tripType: ["city"], days: 3, weather: "warm", startDate: "", tempRange: "warm" });
+              setNTrip({ destination: "", tripType: ["city"], days: 3, weather: "warm", startDate: "", tempRange: "warm", conditions: [] });
               setView("new-trip");
             }, col: "#C47EAA" },
           ].map(({ label, sub, icon, act, col }) => (
