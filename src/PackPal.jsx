@@ -7,7 +7,7 @@ import { C, F } from "./lib/theme";
 import { id, haptic, lastGrapheme } from "./lib/utils";
 import { fetchWeather } from "./lib/weather";
 import { genList, genTripOtd, tempToRange } from "./lib/packing";
-import { TRIP_TYPES, TEMP_RANGES, CATEGORIES } from "./data/taxonomy";
+import { TRIP_TYPES, TEMP_RANGES } from "./data/taxonomy";
 import { HIST_TRIPS } from "./data/history";
 import { useCelebration } from "./components/celebration";
 import { ProgressRing, Btn } from "./components/ui";
@@ -27,6 +27,8 @@ import { DEFAULT_OTD_ITEMS } from "./data/otdDefaults";
 import { migrateTrip, migrateTemplate, slotToSection } from "./lib/migrations";
 import { reloadApp } from "./lib/version";
 import { isPastTrip, endedLabel } from "./lib/tripStatus";
+import { resolveCategories, EMOJI_SUGGESTIONS } from "./lib/categories";
+import { EmojiPicker } from "./components/EmojiPicker";
 import { CONDITIONS, detectConditions } from "./lib/addins";
 import { GlobalOtdEditor } from "./components/GlobalOtdEditor";
 import { SmartRecsView } from "./components/SmartRecsView";
@@ -1297,6 +1299,9 @@ export default function PackPal() {
   const [editGlobalOtd, setEditGlobalOtd] = useState(false);
   const [catalogTemplate, setCatalogTemplate] = usePersist("catalogTemplate", null);
   const [addins, setAddins] = usePersist("addins", null); // trip-type / weather add-ins (additive key; null = built-in COND_ITEMS)
+  const [categoryMeta, setCategoryMeta] = usePersist("categoryMeta", {}); // { [categoryId]: { label?, icon? } } display overrides (additive key)
+  const categories = useMemo(() => resolveCategories(categoryMeta), [categoryMeta]);
+  const [pickingTripIcon, setPickingTripIcon] = useState(false);
   const [editTemplate, setEditTemplate] = useState(false);
   // Full-screen views swap in place, so start each one at the top instead of wherever Home was scrolled to.
   useEffect(() => { window.scrollTo(0, 0); }, [view, editTemplate, editGlobalOtd, templateSync, activeTripId]);
@@ -1541,7 +1546,7 @@ export default function PackPal() {
 
   // ═══ SAVE TO TEMPLATE ═══
   if (templateSync && activeTrip) {
-    return <TemplateSync trip={activeTrip} template={catalogTemplate}
+    return <TemplateSync trip={activeTrip} template={catalogTemplate} categories={categories}
       onApply={(next) => setCatalogTemplate(next)} onExit={() => setTemplateSync(false)} />;
   }
 
@@ -1919,8 +1924,13 @@ export default function PackPal() {
 
     return (<>
       <CelebrationLayer />
+      {pickingTripIcon && (
+        <EmojiPicker title="Trip emoji" value={activeTrip.icon || "✈️"} defaultValue={TRIP_TYPES.find(t => t.id === activeTrip.tripType?.[0])?.icon}
+          suggestions={EMOJI_SUGGESTIONS.trip} onClose={() => setPickingTripIcon(false)}
+          onSave={(e) => setTrips(p => p.map(t => t.id === activeTrip.id ? { ...t, icon: e } : t))} />
+      )}
       {shareOpen && (
-        <ShareSheet text={tripToMarkdown(activeTrip, { otdItems })} filename={markdownFileName(activeTrip)}
+        <ShareSheet text={tripToMarkdown(activeTrip, { otdItems, categories })} filename={markdownFileName(activeTrip)}
           title={`${activeTrip.destination} — packing list`} onClose={() => setShareOpen(false)} />
       )}
       <div style={{ minHeight: "100vh", background: C.cream }}>
@@ -1943,8 +1953,12 @@ export default function PackPal() {
               <span style={{ fontFamily: F.display, fontSize: 22, color: C.charcoal, fontWeight: 500 }}>{st.pct}%</span>
             </ProgressRing>
             <div>
-              <h1 style={{ fontFamily: F.display, fontSize: 28, color: C.charcoal, fontWeight: 400, margin: 0, lineHeight: 1.2 }}>
-                {activeTrip.icon} {activeTrip.destination}
+              <h1 style={{ fontFamily: F.display, fontSize: 28, color: C.charcoal, fontWeight: 400, margin: 0, lineHeight: 1.2, display: "flex", alignItems: "center", gap: 8 }}>
+                <button onClick={() => { if (!locked) setPickingTripIcon(true); }} aria-label="Change trip emoji" title={locked ? "" : "Change trip emoji"} disabled={locked}
+                  style={{ background: "none", border: "none", padding: 0, fontSize: 28, lineHeight: 1.2, cursor: locked ? "default" : "pointer", fontFamily: "inherit" }}>
+                  {activeTrip.icon || "✈️"}
+                </button>
+                <span>{activeTrip.destination}</span>
               </h1>
               <div style={{ fontFamily: F.body, fontSize: 13, color: C.warmGray, marginTop: 4 }}>
                 {activeTrip.days} days · {st.pk} of {st.tot} packed
@@ -2113,7 +2127,7 @@ export default function PackPal() {
         </div>
 
         {arrangeMode && !locked ? (
-          <ArrangeList items={activeTrip.items} onReorder={(next) => reorderItems(activeTrip.id, next)} onDone={() => setArrangeMode(false)} />
+          <ArrangeList items={activeTrip.items} categories={categories} onReorder={(next) => reorderItems(activeTrip.id, next)} onDone={() => setArrangeMode(false)} />
         ) : (<>
         {/* Search & Filter */}
         <div style={{ padding: "16px 24px 8px" }}>
@@ -2142,7 +2156,7 @@ export default function PackPal() {
               border: `1px solid ${!catFilter ? C.copper : C.borderLight}`,
               background: !catFilter ? C.copperGlow : "transparent",
               fontFamily: F.body, fontSize: 12, fontWeight: 500, color: !catFilter ? C.copper : C.warmGray, cursor: "pointer" }}>All</button>
-            {CATEGORIES.map(cat => {
+            {categories.map(cat => {
               const ci = activeTrip.items.filter(i => i.category === cat.id);
               if (!ci.length) return null;
               const cp = ci.filter(i => i.packed).length, active = catFilter === cat.id;
@@ -2160,7 +2174,7 @@ export default function PackPal() {
           {catFilter && (() => {
             const catItems = activeTrip.items.filter(i => i.category === catFilter);
             const sections = [...new Set(catItems.map(i => i.section))];
-            const activeCat = CATEGORIES.find(c => c.id === catFilter);
+            const activeCat = categories.find(c => c.id === catFilter);
             const acColor = activeCat?.color || C.copper;
             return (
               <div style={{ display: "flex", gap: 6, marginTop: 8, overflowX: "auto", paddingBottom: 4, flexWrap: "wrap", alignItems: "center" }}>
@@ -2224,7 +2238,7 @@ export default function PackPal() {
         {/* Items — keyed by trip so per-section collapse state (PackSection) resets on a
             direct trip→trip switch (e.g. Duplicate) instead of carrying over. */}
         <div key={activeTrip.id} style={{ padding: "8px 16px 100px" }}>
-          {CATEGORIES.map(cat => {
+          {categories.map(cat => {
             const cs = grouped[cat.id]; if (!cs) return null;
             const ci = activeTrip.items.filter(i => i.category === cat.id);
             const cp = ci.filter(i => i.packed).length, allDone = cp === ci.length;
@@ -2316,7 +2330,7 @@ export default function PackPal() {
         <div style={{ padding: "24px 20px" }}>
           <h2 style={{ fontFamily: F.display, fontSize: 28, color: C.charcoal, fontWeight: 400, marginBottom: 4 }}>Your packing intelligence</h2>
           <p style={{ fontFamily: F.body, fontSize: 14, color: C.warmGray, marginBottom: 28 }}>Built from 22 trips of personal data.</p>
-          <Insights trips={trips} />
+          <Insights trips={trips} categories={categories} />
         </div>
       </div>
     );
@@ -2367,7 +2381,8 @@ export default function PackPal() {
 
   // ═══ PACKING TEMPLATE EDITOR ═══
   if (editTemplate) {
-    return <TemplateEditor template={catalogTemplate} setTemplate={setCatalogTemplate} addins={addins} setAddins={setAddins} onExit={() => setEditTemplate(false)} />;
+    return <TemplateEditor template={catalogTemplate} setTemplate={setCatalogTemplate} addins={addins} setAddins={setAddins}
+      categoryMeta={categoryMeta} setCategoryMeta={setCategoryMeta} onExit={() => setEditTemplate(false)} />;
   }
 
   // ═══ HOME ═══
@@ -2455,7 +2470,7 @@ export default function PackPal() {
             { label: "Insights", sub: "Patterns & tips", icon: <BarChart3 size={20} />, act: () => setView("insights"), col: C.sage },
             { label: "Freak Out Mode", sub: "ADHD support", icon: <Brain size={20} />, act: () => setFreakOut(true), col: C.lavender },
             { label: "Out the Door", sub: `${otdItems.length} default items`, icon: <DoorOpen size={20} />, act: () => setEditGlobalOtd(true), col: "#C17F59" },
-            { label: "Packing Template", sub: catalogTemplate || addins ? "Customized" : "Default items", icon: <Edit3 size={20} />, act: () => setEditTemplate(true), col: C.sage },
+            { label: "Packing Template", sub: catalogTemplate || addins || Object.keys(categoryMeta || {}).length ? "Customized" : "Default items", icon: <Edit3 size={20} />, act: () => setEditTemplate(true), col: C.sage },
             { label: "Quick Pack", sub: "Weekend getaway", icon: <Timer size={20} />, act: () => {
               setNTrip({ destination: "", tripType: ["city"], days: 3, weather: "warm", startDate: "", tempRange: "warm", conditions: [] });
               setView("new-trip");
