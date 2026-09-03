@@ -7,6 +7,7 @@ import {
 } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { auth, db, LOCAL_MODE } from "./firebase";
+import { clearLocal } from "./localMirror";
 
 // ─────────────────────────────────────────────────────────────
 // Auth layer — phone OTP via Firebase Authentication, with a synthetic
@@ -135,6 +136,9 @@ export function AuthProvider({ children }) {
   const signOut = useCallback(async () => {
     if (!auth) return;
     await fbSignOut(auth);
+    // The localStorage mirror is this account's data — never leave it behind for
+    // the next person who signs in on this device. (Account flushes first.)
+    clearLocal();
     setUser(null);
     setProfile(null);
   }, []);

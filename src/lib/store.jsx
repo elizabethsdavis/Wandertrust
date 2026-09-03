@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState, useCallback } f
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db, LOCAL_MODE } from "./firebase";
 import { useAuth } from "./auth";
+import { readLocal, writeLocal, clearLocal, getMirrorOwner, setMirrorOwner } from "./localMirror";
 
 // ─────────────────────────────────────────────────────────────
 // Cloud-synced state store
@@ -19,33 +20,9 @@ import { useAuth } from "./auth";
 
 const StoreCtx = createContext(null);
 
-const LS_PREFIX = "pp2_";
-// Every usePersist key. readLocal() only restores keys listed here, so a new
-// key MUST be added or it silently drops out of the offline / local-mode mirror.
-const KNOWN_KEYS = ["trips", "wardrobe", "customOccasions", "otdItems", "catalogTemplate"];
-
-function readLocal() {
-  const data = {};
-  for (const k of KNOWN_KEYS) {
-    try {
-      const v = localStorage.getItem(LS_PREFIX + k);
-      if (v != null) data[k] = JSON.parse(v);
-    } catch {
-      /* ignore */
-    }
-  }
-  return data;
-}
-
-function writeLocal(data) {
-  for (const k of Object.keys(data || {})) {
-    try {
-      localStorage.setItem(LS_PREFIX + k, JSON.stringify(data[k]));
-    } catch {
-      /* ignore */
-    }
-  }
-}
+// The localStorage mirror helpers (key layout, read/write/clear) live in
+// ./localMirror so auth.jsx can clear the mirror on sign-out without importing
+// this module (which would be a circular dependency).
 
 function StoreSplash() {
   return (
@@ -89,6 +66,7 @@ export function StoreProvider({ children }) {
   dataRef.current = data;
   const loadedRef = useRef(LOCAL_MODE);
   const saveTimer = useRef(null);
+  const dirtyRef = useRef(false); // true while the latest state has not reached Firestore
 
   // ── Load on login / user change (cloud mode only) ──
   useEffect(() => {
@@ -98,6 +76,11 @@ export function StoreProvider({ children }) {
     setLoaded(false);
 
     (async () => {
+      // The mirror belongs to exactly one account. If a different user signs in
+      // on this device, drop the previous user's cache before anything can read
+      // it (Onboarding offers "bring this device's trips" from these keys).
+      const owner = getMirrorOwner();
+      if (uid && owner && owner !== uid) clearLocal();
       const localCache = readLocal();
       if (!db || !uid) {
         if (!active) return;
@@ -124,6 +107,7 @@ export function StoreProvider({ children }) {
         const next = cloud ?? {};
         setData(next);
         writeLocal(next);
+        setMirrorOwner(uid);
         setSyncState("idle");
       } catch (e) {
         console.warn("[PackPal] Cloud load failed; using offline cache:", e?.message || e);
@@ -145,7 +129,7 @@ export function StoreProvider({ children }) {
 
   const pushCloud = useCallback(
     async (snapshot) => {
-      if (LOCAL_MODE || !db || !uid) return;
+      if (LOCAL_MODE || !db || !uid) return true;
       setSyncState("saving");
       try {
         await setDoc(
@@ -153,10 +137,14 @@ export function StoreProvider({ children }) {
           { state: JSON.stringify(snapshot), updatedAt: serverTimestamp() },
           { merge: true }
         );
+        // Only mark clean if nothing newer was scheduled while this write was in flight.
+        if (dataRef.current === snapshot) dirtyRef.current = false;
         setSyncState("idle");
+        return true;
       } catch (e) {
         console.warn("[PackPal] Cloud save failed (kept locally):", e?.message || e);
         setSyncState("error");
+        return false;
       }
     },
     [uid]
@@ -169,6 +157,7 @@ export function StoreProvider({ children }) {
         setSyncState("local");
         return;
       }
+      dirtyRef.current = true;
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => pushCloud(snapshot), 800);
     },
@@ -188,27 +177,42 @@ export function StoreProvider({ children }) {
     [scheduleSave]
   );
 
+  // Push the latest state now (cancelling the debounce). Resolves true when the
+  // cloud is up to date, false if the write failed — callers such as sign-out
+  // use that to warn before discarding the local mirror.
+  const flush = useCallback(async () => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    if (LOCAL_MODE || !db || !uid || !loadedRef.current) return true;
+    if (!dirtyRef.current) return true;
+    return pushCloud(dataRef.current);
+  }, [uid, pushCloud]);
+
   // Flush any pending debounced save when the tab is hidden or closed.
   useEffect(() => {
-    const flush = () => {
-      if (saveTimer.current) {
-        clearTimeout(saveTimer.current);
-        saveTimer.current = null;
-      }
-      if (!LOCAL_MODE && db && uid && loadedRef.current) pushCloud(dataRef.current);
+    const onUnload = () => {
+      flush();
     };
     const onVis = () => {
       if (document.visibilityState === "hidden") flush();
     };
-    window.addEventListener("beforeunload", flush);
+    window.addEventListener("beforeunload", onUnload);
     document.addEventListener("visibilitychange", onVis);
     return () => {
-      window.removeEventListener("beforeunload", flush);
+      window.removeEventListener("beforeunload", onUnload);
       document.removeEventListener("visibilitychange", onVis);
     };
-  }, [uid, pushCloud]);
+  }, [flush]);
 
-  const value = { data, setKey, ready: loaded, syncState };
+  // On unmount (sign-out) drop any pending debounced write: the account is gone,
+  // so it could only fail against the rules. Account flushes before signing out.
+  useEffect(() => () => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+  }, []);
+
+  const value = { data, setKey, ready: loaded, syncState, flush };
 
   return <StoreCtx.Provider value={value}>{loaded ? children : <StoreSplash />}</StoreCtx.Provider>;
 }
@@ -230,7 +234,10 @@ export function usePersist(key, def) {
   return [value, setValue];
 }
 
+const noopFlush = async () => true;
 export function useStoreMeta() {
   const store = useContext(StoreCtx);
-  return store ? { ready: store.ready, syncState: store.syncState } : { ready: true, syncState: "local" };
+  return store
+    ? { ready: store.ready, syncState: store.syncState, flush: store.flush }
+    : { ready: true, syncState: "local", flush: noopFlush };
 }
