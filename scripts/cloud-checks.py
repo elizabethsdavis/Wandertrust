@@ -20,7 +20,7 @@ No real Firebase project is touched.
 import json, os, re, sys, time, traceback
 from playwright.sync_api import sync_playwright
 
-BASE = "http://localhost:4174"
+BASE = os.environ.get("PP_CLOUD_BASE", "http://localhost:4174")   # override when the preview runs elsewhere
 results = []
 os.makedirs("shots", exist_ok=True)
 

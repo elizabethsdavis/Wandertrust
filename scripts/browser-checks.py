@@ -20,6 +20,7 @@ Last full pass: 2026-09-03 (36/36) against the Tier 3 build; the T3 "packing a s
 import json, re, sys, os
 from playwright.sync_api import sync_playwright, expect
 
+BASE = os.environ.get("PP_BASE", "http://localhost:4173")   # override when the preview runs elsewhere
 SHOTS = os.path.join(os.path.dirname(__file__), "shots")
 os.makedirs(SHOTS, exist_ok=True)
 results = []
@@ -91,7 +92,7 @@ with sync_playwright() as p:
     page.on("console", lambda m: (net if "Failed to load resource" in m.text else errors).append(m.text) if m.type == "error" else None)
     page.on("requestfailed", lambda r: net.append(f"{r.url} → {r.failure}"))
 
-    page.goto("http://localhost:4173/")
+    page.goto(BASE + "/")
     page.get_by_role("button", name="New Trip").wait_for()
     ok(True, "LOCAL_MODE: app opens straight to Home with no login")
     page.screenshot(path=f"{SHOTS}/01-home.png")
@@ -255,7 +256,7 @@ with sync_playwright() as p:
         createdAt: '2026-01-01T00:00:00.000Z', icon: '🏙️' });
       localStorage.setItem('pp2_trips', JSON.stringify(ts));
     }""")
-    page.goto("http://localhost:4173/")
+    page.goto(BASE + "/")
     page.get_by_role("button", name="New Trip").wait_for()
     page.wait_for_timeout(500)
     legacy = [t for t in trips(page) if t["id"] == "legacy1"][0]
@@ -264,7 +265,7 @@ with sync_playwright() as p:
     ok(any(o["name"] == "Phone" for o in legacy["otdItems"]) and any(i["name"] == "Socks" for i in legacy["items"]), "B6 migrated item landed in otdItems; non-checkout item untouched")
 
     # ── B2: template survives reload in local mode ──
-    page.goto("http://localhost:4173/")
+    page.goto(BASE + "/")
     page.get_by_role("button", name="New Trip").wait_for()
     ok(page.get_by_text("Default items", exact=True).count() == 1, "B2 setup: template card reads 'Default items'")
     page.get_by_role("button", name="Packing Template").click()
