@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { ArrowLeft, X, RotateCcw, Check } from "lucide-react";
+import { ArrowLeft, X, RotateCcw, Check, RefreshCw, BatteryCharging, WashingMachine } from "lucide-react";
 import { C, F } from "../lib/theme";
 import { CATEGORIES } from "../data/taxonomy";
-import { CORE } from "../data/catalog";
+import { templateBase, FLAGS } from "../lib/template";
 
 // ─────────────────────────────────────────────────────────────
 // Packing Template editor.
@@ -18,12 +18,14 @@ import { CORE } from "../data/catalog";
 // ─────────────────────────────────────────────────────────────
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
+const coreDraft = () => templateBase(null);
 
-function coreDraft() {
-  const d = clone(CORE);
-  delete d.checkout;
-  return d;
-}
+// Per-item flag toggles: pre-set what every new trip should start with.
+const FLAG_UI = {
+  needsRefill: { Icon: RefreshCw, color: C.amber, glow: C.amberGlow, title: "Needs refill before each trip" },
+  needsCharge: { Icon: BatteryCharging, color: C.teal, glow: C.tealGlow, title: "Needs charging before each trip" },
+  needsWash: { Icon: WashingMachine, color: C.lavender, glow: C.lavenderGlow, title: "Needs a wash before each trip" },
+};
 
 function AddRow({ placeholder, accent, onAdd }) {
   const [v, setV] = useState("");
@@ -76,6 +78,7 @@ export default function TemplateEditor({ template, setTemplate, onExit }) {
   };
 
   const renameItem = (cat, sec, i, name) => mutate((d) => { d[cat][sec][i].name = name; });
+  const toggleFlag = (cat, sec, i, flag) => mutate((d) => { const it = d[cat][sec][i]; if (it[flag]) delete it[flag]; else it[flag] = true; });
   const removeItem = (cat, sec, i) =>
     mutate((d) => {
       d[cat][sec].splice(i, 1);
@@ -125,8 +128,9 @@ export default function TemplateEditor({ template, setTemplate, onExit }) {
       <div style={{ padding: "20px 18px 8px" }}>
         <h2 style={{ fontFamily: F.display, fontSize: 28, color: C.charcoal, fontWeight: 400, margin: 0 }}>Your default items</h2>
         <p style={{ fontFamily: F.body, fontSize: 14, color: C.warmGray, marginTop: 6, lineHeight: 1.5 }}>
-          Add, rename, or remove the items every <strong>new</strong> trip starts with. Changes only affect trips you create
-          from now on — existing lists stay as they are.
+          Add, rename, or remove the items every <strong>new</strong> trip starts with, and pre-mark what needs a
+          refill, a charge, or a wash. Changes only affect trips you create from now on — existing lists stay as they are.
+          To pull a trip's edits back in here, open the trip and tap <strong>Save to template</strong>.
         </p>
       </div>
 
@@ -161,6 +165,16 @@ export default function TemplateEditor({ template, setTemplate, onExit }) {
                           onFocus={(e) => { e.target.style.borderColor = C.borderMedium; e.target.style.background = C.cream; }}
                           onBlur={(e) => { e.target.style.borderColor = "transparent"; e.target.style.background = "transparent"; }}
                         />
+                        {FLAGS.map((flag) => {
+                          const ui = FLAG_UI[flag]; const on = !!it[flag];
+                          return (
+                            <button key={flag} onClick={() => toggleFlag(cat.id, sec, i, flag)} title={ui.title} aria-label={ui.title} aria-pressed={on}
+                              style={{ width: 28, height: 28, borderRadius: 8, flexShrink: 0, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                                border: `1px solid ${on ? "transparent" : C.borderLight}`, background: on ? ui.glow : "transparent" }}>
+                              <ui.Icon size={13} color={on ? ui.color : C.borderMedium} />
+                            </button>
+                          );
+                        })}
                         <button onClick={() => removeItem(cat.id, sec, i)} aria-label="Remove"
                           style={{ background: "none", border: "none", cursor: "pointer", padding: 6, flexShrink: 0 }}>
                           <X size={15} color={C.softGray} />

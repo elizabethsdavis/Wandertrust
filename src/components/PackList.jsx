@@ -1,12 +1,12 @@
 // A packing-list row (PackItem) and a collapsible section of rows (PackSection).
 import { useState, useEffect, useRef } from "react";
-import { Plus, Check, ChevronRight, X, RefreshCw, BatteryCharging } from "lucide-react";
+import { Plus, Check, ChevronRight, X, RefreshCw, BatteryCharging, WashingMachine } from "lucide-react";
 import { C, F } from "../lib/theme";
 import { Btn } from "./ui";
 
-export function PackItem({ item, onToggle, onRemove, readOnly, refillMode, onToggleRefill, onToggleRefilled, chargeMode, onToggleCharge, onToggleCharged }) {
+export function PackItem({ item, onToggle, onRemove, readOnly, refillMode, onToggleRefill, onToggleRefilled, chargeMode, onToggleCharge, onToggleCharged, washMode, onToggleWash, onToggleWashed }) {
   const [hov, setHov] = useState(false);
-  const markMode = refillMode || chargeMode;
+  const markMode = refillMode || chargeMode || washMode;
   return (
     <div onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
       style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", marginBottom: 2,
@@ -30,6 +30,15 @@ export function PackItem({ item, onToggle, onRemove, readOnly, refillMode, onTog
             cursor: "pointer" }}>
           {item.needsCharge && <BatteryCharging size={13} color="#fff" strokeWidth={3} />}
         </div>
+      ) : washMode ? (
+        <div onClick={() => onToggleWash?.(item.id)}
+          style={{ width: 24, height: 24, borderRadius: 8, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+            border: item.needsWash ? "none" : `2px solid ${C.borderMedium}`,
+            background: item.needsWash ? `linear-gradient(135deg,${C.lavender},#B8A8D8)` : "transparent",
+            transition: "all .2s", boxShadow: item.needsWash ? `0 2px 8px rgba(155,142,196,.3)` : "none",
+            cursor: "pointer" }}>
+          {item.needsWash && <WashingMachine size={13} color="#fff" strokeWidth={3} />}
+        </div>
       ) : (
         <div onClick={() => { if (!readOnly) onToggle(item.id); }}
           style={{ width: 24, height: 24, borderRadius: 8, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
@@ -45,7 +54,7 @@ export function PackItem({ item, onToggle, onRemove, readOnly, refillMode, onTog
         textDecoration: !markMode && item.packed ? "line-through" : "none",
         opacity: !markMode && item.packed ? .5 : 1, transition: "all .2s",
         cursor: markMode ? "pointer" : readOnly ? "default" : "pointer" }}
-        onClick={() => { if (refillMode) onToggleRefill?.(item.id); else if (chargeMode) onToggleCharge?.(item.id); else if (!readOnly) onToggle(item.id); }}>
+        onClick={() => { if (refillMode) onToggleRefill?.(item.id); else if (chargeMode) onToggleCharge?.(item.id); else if (washMode) onToggleWash?.(item.id); else if (!readOnly) onToggle(item.id); }}>
         {item.name}
       </span>
 
@@ -93,6 +102,23 @@ export function PackItem({ item, onToggle, onRemove, readOnly, refillMode, onTog
         </button>
       )}
 
+      {/* Inline laundry indicator */}
+      {!markMode && item.needsWash && (
+        <button onClick={(e) => { e.stopPropagation(); onToggleWashed?.(item.id); }}
+          title={item.washed ? "Clean!" : "Tap to mark as clean"}
+          style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 10px", borderRadius: 8, flexShrink: 0,
+            border: `1px solid ${item.washed ? "rgba(139,168,136,.3)" : "rgba(155,142,196,.3)"}`,
+            background: item.washed ? C.sageGlow : C.lavenderGlow,
+            cursor: "pointer", transition: "all .15s" }}>
+          {item.washed ? <Check size={11} color={C.sage} strokeWidth={3} /> : <WashingMachine size={11} color={C.lavender} />}
+          <span style={{ fontSize: 10, fontFamily: F.body, fontWeight: 600,
+            color: item.washed ? C.sage : C.lavender,
+            textTransform: "uppercase", letterSpacing: ".03em" }}>
+            {item.washed ? "Clean" : "Wash"}
+          </span>
+        </button>
+      )}
+
       {refillMode && item.needsRefill && (
         <span style={{ fontSize: 10, fontFamily: F.body, fontWeight: 600, color: C.amber, background: C.amberGlow,
           padding: "2px 8px", borderRadius: 6, letterSpacing: ".03em", textTransform: "uppercase", flexShrink: 0 }}>Needs refill</span>
@@ -100,6 +126,10 @@ export function PackItem({ item, onToggle, onRemove, readOnly, refillMode, onTog
       {chargeMode && item.needsCharge && (
         <span style={{ fontSize: 10, fontFamily: F.body, fontWeight: 600, color: C.teal, background: C.tealGlow,
           padding: "2px 8px", borderRadius: 6, letterSpacing: ".03em", textTransform: "uppercase", flexShrink: 0 }}>Needs charge</span>
+      )}
+      {washMode && item.needsWash && (
+        <span style={{ fontSize: 10, fontFamily: F.body, fontWeight: 600, color: C.lavender, background: C.lavenderGlow,
+          padding: "2px 8px", borderRadius: 6, letterSpacing: ".03em", textTransform: "uppercase", flexShrink: 0 }}>Needs wash</span>
       )}
 
       {hov && !readOnly && !markMode && onRemove && (
@@ -111,19 +141,23 @@ export function PackItem({ item, onToggle, onRemove, readOnly, refillMode, onTog
   );
 }
 
-export function PackSection({ title, items, onToggle, onRemove, onAddItem, readOnly, refillMode, onToggleRefill, onToggleRefilled, chargeMode, onToggleCharge, onToggleCharged }) {
+export function PackSection({ title, items, onToggle, onRemove, onAddItem, readOnly, refillMode, onToggleRefill, onToggleRefilled, chargeMode, onToggleCharge, onToggleCharged, washMode, onToggleWash, onToggleWashed, forceOpen }) {
   const [override, setOverride] = useState(null); // null = auto: collapse once complete
   const [adding, setAdding] = useState(false);
   const [nv, setNv] = useState("");
   const ref = useRef(null);
   const pk = items.filter(i => i.packed).length, tot = items.length, done = tot > 0 && pk === tot;
   // Auto-collapse a completed section (tap the header to reopen). Always open in
-  // refill/charge modes, which need every item visible.
-  const open = override !== null ? override : ((refillMode || chargeMode) ? true : !done);
+  // refill/charge/laundry modes, which need every item visible.
+  const markMode = refillMode || chargeMode || washMode;
+  const open = override !== null ? override : (markMode ? true : !done);
   useEffect(() => { if (adding && ref.current) ref.current.focus(); }, [adding]);
-  const markMode = refillMode || chargeMode;
+  // "Collapse all" / "Expand all" from the trip header: each press carries a new seq,
+  // so the same direction can be applied again after the user toggled sections by hand.
+  useEffect(() => { if (forceOpen) setOverride(forceOpen.open); }, [forceOpen?.seq]);
   const refillCount = refillMode ? items.filter(i => i.needsRefill).length : 0;
   const chargeCount = chargeMode ? items.filter(i => i.needsCharge).length : 0;
+  const washCount = washMode ? items.filter(i => i.needsWash).length : 0;
 
   return (
     <div style={{ marginBottom: 8 }}>
@@ -146,6 +180,11 @@ export function PackSection({ title, items, onToggle, onRemove, onAddItem, readO
             background: chargeCount > 0 ? C.tealGlow : C.copperSubtle, padding: "2px 10px", borderRadius: 8 }}>
             {chargeCount} charge{chargeCount !== 1 ? "s" : ""}
           </span>
+        ) : washMode ? (
+          <span style={{ fontFamily: F.body, fontSize: 12, fontWeight: 500, color: washCount > 0 ? C.lavender : C.softGray,
+            background: washCount > 0 ? C.lavenderGlow : C.copperSubtle, padding: "2px 10px", borderRadius: 8 }}>
+            {washCount} to wash
+          </span>
         ) : (
           <span style={{ fontFamily: F.body, fontSize: 12, fontWeight: 500, color: done ? C.sage : C.softGray,
             background: done ? C.sageGlow : C.copperSubtle, padding: "2px 10px", borderRadius: 8 }}>{pk}/{tot}</span>
@@ -155,7 +194,8 @@ export function PackSection({ title, items, onToggle, onRemove, onAddItem, readO
         <div style={{ paddingLeft: 12 }}>
           {items.map(i => <PackItem key={i.id} item={i} onToggle={onToggle} onRemove={onRemove} readOnly={readOnly}
             refillMode={refillMode} onToggleRefill={onToggleRefill} onToggleRefilled={onToggleRefilled}
-            chargeMode={chargeMode} onToggleCharge={onToggleCharge} onToggleCharged={onToggleCharged} />)}
+            chargeMode={chargeMode} onToggleCharge={onToggleCharge} onToggleCharged={onToggleCharged}
+            washMode={washMode} onToggleWash={onToggleWash} onToggleWashed={onToggleWashed} />)}
           {!readOnly && !markMode && (adding ? (
             <form onSubmit={e => { e.preventDefault(); if (nv.trim()) { onAddItem(nv.trim()); setNv(""); setAdding(false); } }}
               style={{ display: "flex", gap: 8, padding: "6px 14px" }}>

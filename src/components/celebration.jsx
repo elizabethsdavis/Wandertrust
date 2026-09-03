@@ -56,6 +56,7 @@ const CELEBRATE_MSGS = {
   allPacked: ["ALL PACKED!", "You legend!", "Trip-ready!", "Everything's in!"],
   allRefilled: ["All refilled!", "Restocked & ready!", "Refill champion!"],
   allCharged: ["All charged up!", "Fully juiced!", "Powered & ready!"],
+  allWashed: ["Fresh & clean!", "Laundry done!", "Ready to wear!"],
   otdDone: ["Ready to go!", "Out the door!", "Nothing forgotten!"],
   outfitDone: ["Outfit complete!", "Styled & sorted!", "Looking good!"],
 };
@@ -76,7 +77,7 @@ export function useCelebration() {
   const timerRef = useRef(null);
   const celebrate = useCallback((type, intensity = "medium") => {
     const msgs = CELEBRATE_MSGS[type] || CELEBRATE_MSGS.section;
-    const emojis = { section: "🎉", category: "🏆", allPacked: "🎊", allRefilled: "✅", allCharged: "🔋", otdDone: "🚀", outfitDone: "👗" };
+    const emojis = { section: "🎉", category: "🏆", allPacked: "🎊", allRefilled: "✅", allCharged: "🔋", allWashed: "🧺", otdDone: "🚀", outfitDone: "👗" };
     const msg = msgs[Math.floor(Math.random() * msgs.length)];
     haptic("celebration");
     setShow({ msg, emoji: emojis[type] || "🎉", intensity });

@@ -1,11 +1,11 @@
 // Focus Pack — card-by-card guided packing.
 import { useState, useMemo } from "react";
-import { Check, ArrowLeft, AlertTriangle, RefreshCw, BatteryCharging } from "lucide-react";
+import { Check, ArrowLeft, AlertTriangle, RefreshCw, BatteryCharging, WashingMachine } from "lucide-react";
 import { C, F } from "../lib/theme";
 import { ProgressRing, Btn } from "./ui";
 
 // ── Guided Pack Mode ──
-export function GuidedPack({ items, onToggle, onToggleRefilled, onToggleCharged, onRemove, onExit, tripName }) {
+export function GuidedPack({ items, onToggle, onToggleRefilled, onToggleCharged, onToggleWashed, onRemove, onExit, tripName }) {
   const unpacked = items.filter(i => !i.packed);
   const [idx, setIdx] = useState(0);
   const flat = useMemo(() => {
@@ -88,6 +88,17 @@ export function GuidedPack({ items, onToggle, onToggleRefilled, onToggleCharged,
             </span>
           </div>
         )}
+        {cur.needsWash && (
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8,
+            background: cur.washed ? C.sageGlow : C.lavenderGlow,
+            padding: "6px 14px", borderRadius: 10, border: `1px solid ${cur.washed ? "rgba(139,168,136,.2)" : "rgba(155,142,196,.2)"}` }}>
+            {cur.washed ? <Check size={14} color={C.sage} /> : <WashingMachine size={14} color={C.lavender} />}
+            <span style={{ fontFamily: F.body, fontSize: 12, fontWeight: 600,
+              color: cur.washed ? C.sage : C.lavender }}>
+              {cur.washed ? "Clean!" : "Needs wash"}
+            </span>
+          </div>
+        )}
       </div>
       <div style={{ display: "flex", gap: 16, marginTop: 48, flexWrap: "wrap", justifyContent: "center" }}>
         <Btn v="sage" sz="lg" onClick={() => { onToggle(cur.id); setTimeout(() => setIdx(i => Math.min(i, flat.length - 2)), 50); }}
@@ -102,6 +113,12 @@ export function GuidedPack({ items, onToggle, onToggleRefilled, onToggleCharged,
           <Btn v="teal" sz="lg" onClick={() => onToggleCharged(cur.id)}
             style={{ minWidth: 140 }}>
             <BatteryCharging size={18} /> Charged
+          </Btn>
+        )}
+        {cur.needsWash && !cur.washed && (
+          <Btn v="lavender" sz="lg" onClick={() => onToggleWashed?.(cur.id)}
+            style={{ minWidth: 140 }}>
+            <WashingMachine size={18} /> Clean
           </Btn>
         )}
         <Btn v="secondary" sz="lg" onClick={() => setIdx(i => Math.min(i + 1, flat.length - 1))} style={{ minWidth: 120 }}>Skip</Btn>

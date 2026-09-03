@@ -36,6 +36,8 @@ export default function Onboarding() {
   const [, setWardrobe] = usePersist("wardrobe", {});
   const [, setCustomOccasions] = usePersist("customOccasions", []);
   const [, setOtdItems] = usePersist("otdItems", []);
+  const [, setCatalogTemplate] = usePersist("catalogTemplate", null);
+  const [, setWardrobeMeta] = usePersist("wardrobeMeta", {});
 
   const [importStarters, setImportStarters] = useState(false);
   const [bringLocal, setBringLocal] = useState(true);
@@ -61,6 +63,8 @@ export default function Onboarding() {
     const customOccasions = Array.isArray(coRaw) ? coRaw : [];
     const otdRaw = read("otdItems", []);
     const otdItems = Array.isArray(otdRaw) ? otdRaw : [];
+    const catalogTemplate = read("catalogTemplate", null);
+    const wardrobeMeta = read("wardrobeMeta", {}) || {};
     const completed = trips.filter(
       (t) => Array.isArray(t.items) && t.items.length > 0 && t.items.every((i) => i.packed)
     ).length;
@@ -69,6 +73,8 @@ export default function Onboarding() {
       wardrobe,
       customOccasions,
       otdItems,
+      catalogTemplate,
+      wardrobeMeta,
       completed,
       active: trips.length - completed,
       hasExtras:
@@ -102,6 +108,8 @@ export default function Onboarding() {
         if (Object.keys(localData.wardrobe).length) setWardrobe(localData.wardrobe);
         if (localData.customOccasions.length) setCustomOccasions(localData.customOccasions);
         if (localData.otdItems.length) setOtdItems(localData.otdItems);
+        if (localData.catalogTemplate) setCatalogTemplate(localData.catalogTemplate);
+        if (Object.keys(localData.wardrobeMeta).length) setWardrobeMeta(localData.wardrobeMeta);
       }
       if (importStarters) merged.push(...buildStarterTrips());
       if (merged.length) setTrips(merged);
