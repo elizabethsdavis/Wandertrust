@@ -17,7 +17,7 @@ export default defineConfig({
   root,
   plugins: [react(), versionStamp()],
   resolve: {
-    alias: [{ find: /^firebase\/(app|auth|firestore|functions)$/, replacement: path.join(here, "fake-firebase.js") }],
+    alias: [{ find: /^firebase\/(app|auth|firestore|functions|storage)$/, replacement: path.join(here, "fake-firebase.js") }],
   },
   build: { outDir: path.join(root, "dist-cloudsim"), emptyOutDir: true, sourcemap: false },
 });

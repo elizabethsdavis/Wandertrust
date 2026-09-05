@@ -115,3 +115,29 @@ export function serverTimestamp() { return { __serverTimestamp: true }; }
 // ── firebase/functions ──
 export function getFunctions() { return { fake: true }; }
 export function httpsCallable() { return async () => ({ data: {} }); }
+
+// ── firebase/storage ── (Outfits batch) uploads live in memory; the "download
+// URL" is a blob: URL of the uploaded bytes, so <img> renders it in the harness.
+const uploads = new Map(); // path → { blob, url }
+export function getStorage() { return { fake: true }; }
+export function ref(_s, path) { return { path }; }
+export async function uploadBytes(r, blob) {
+  if (ls("__fakeFailUploads") === "1") throw new Error("fake storage: upload failed");
+  const url = URL.createObjectURL(blob);
+  uploads.set(r.path, { blob, url });
+  const log = (() => { try { return JSON.parse(ls("__fakeUploads", "[]")); } catch { return []; } })();
+  log.push({ path: r.path, bytes: blob.size, type: blob.type, at: Date.now() });
+  setLs("__fakeUploads", JSON.stringify(log));
+  return { ref: r };
+}
+export async function getDownloadURL(r) {
+  const u = uploads.get(r.path);
+  if (!u) throw new Error("fake storage: object-not-found");
+  return u.url;
+}
+export async function deleteObject(r) {
+  uploads.delete(r.path);
+  const log = (() => { try { return JSON.parse(ls("__fakeDeletes", "[]")); } catch { return []; } })();
+  log.push({ path: r.path, at: Date.now() });
+  setLs("__fakeDeletes", JSON.stringify(log));
+}
