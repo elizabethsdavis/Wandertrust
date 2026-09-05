@@ -169,3 +169,74 @@ export function parseItemMeta(name, overrides) {
 
 /** Family ids in display order for the picker. */
 export const COLOR_FAMILY_IDS = Object.keys(COLOR_FAMILIES);
+
+// ── structured entry (Fields batch) ──
+//
+// The outfit editor's "Add new …" form takes the colour, the brand and the type
+// of clothing in separate fields. The item NAME stays the identity everywhere
+// (wardrobe arrays, outfit slots, synced packing items, wardrobeMeta keys), so
+// the fields are composed into the "<Colour> <Brand> <type>" convention the
+// parser already reads ("Blue Zevelyn jeans"), and what was typed is kept in
+// the item's wardrobeMeta entry — additive fields `colorName` and `type` next to
+// the existing `color` / `brand` overrides — so a later edit can prefill it and
+// nothing is lost to parsing.
+
+const tidy = (s) => String(s || "").trim().replace(/\s+/g, " ");
+const capFirst = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+
+/** "Black Lululemon flowy pants" from { color, brand, type }; "" when every field is blank. */
+export function composeItemName({ color, brand, type } = {}) {
+  const c = tidy(color), b = tidy(brand), t = tidy(type);
+  const parts = [c, b, t].filter(Boolean);
+  if (!parts.length) return "";
+  const name = parts.join(" ");
+  // Capitalise the first letter unless the name starts with the brand — brands keep their own casing ("lululemon", "SKIMS").
+  return c || !b ? capFirst(name) : name;
+}
+
+/**
+ * The wardrobeMeta entry to store for a structured entry — only when more than
+ * the type was given (a bare type is plain free text, exactly like the old single
+ * field): { colorName?, brand?, type? }. `brand` doubles as the manual brand
+ * override the parser honours. Returns null for a type-only / empty entry.
+ */
+export function structuredMeta({ color, brand, type } = {}) {
+  const c = tidy(color), b = tidy(brand), t = tidy(type);
+  if (!c && !b) return null;
+  const meta = {};
+  if (c) meta.colorName = c;
+  if (b) meta.brand = b;
+  if (t) meta.type = t;
+  return meta;
+}
+
+/**
+ * Apply a "Fix details" patch ({ color?, brand? }, or null = back to automatic)
+ * on top of an item's entry, keeping its structured fields. Returns the entry to
+ * store, or null when nothing is left (delete the key).
+ */
+export function applyMetaPatch(existing, patch) {
+  const keep = {};
+  if (existing?.colorName) keep.colorName = existing.colorName;
+  if (existing?.type) keep.type = existing.type;
+  const next = patch && typeof patch === "object" ? { ...keep, ...patch } : keep;
+  return Object.keys(next).length ? next : null;
+}
+
+const uniqSorted = (values) => {
+  const seen = new Map();
+  for (const v of values) if (v && !seen.has(v.toLowerCase())) seen.set(v.toLowerCase(), v);
+  return [...seen.values()].sort((a, b) => a.localeCompare(b));
+};
+
+/** Distinct brands across the whole wardrobe (stored or parsed) — suggestions for the brand field. */
+export function wardrobeBrands(wardrobe, wardrobeMeta) {
+  const out = [];
+  for (const items of Object.values(wardrobe || {})) for (const it of items || []) out.push(parseItemMeta(it, wardrobeMeta?.[it]).brand);
+  return uniqSorted(out);
+}
+
+/** Distinct types recorded for one slot (structured entries only) — suggestions for the type field. */
+export function wardrobeTypes(wardrobe, wardrobeMeta, slotId) {
+  return uniqSorted((wardrobe?.[slotId] || []).map((it) => wardrobeMeta?.[it]?.type));
+}
