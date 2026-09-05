@@ -8,13 +8,14 @@
 //   photo / onPickPhoto / onRemovePhoto / photoBusy   optional photo controls (saved outfits)
 //   footer               optional extra actions rendered above the navigation
 //   onDone(reason)       back arrow / Done; onCancel when provided renders an "x"
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Check, X, Plus, ChevronLeft, ChevronRight, Camera, Loader, Trash2, Shirt, Palette, Shield, Footprints, ShoppingBag, Gem, Watch, Eye, Star } from "lucide-react";
 import { C, F } from "../lib/theme";
 import { Btn } from "./ui";
 import { WardrobeCarousel } from "./WardrobeCarousel";
 import { OUTFIT_SLOT_DEFS } from "../data/outfitSlots";
 import { photoSrc } from "../lib/photos";
+import { composeItemName, structuredMeta, applyMetaPatch, parseItemMeta, swatchBackground, wardrobeBrands, wardrobeTypes, COLOR_FAMILY_IDS } from "../lib/wardrobe";
 
 const ICONS = { top: Shirt, bottom: Palette, layer: Shield, shoes: Footprints, bag: ShoppingBag, necklace: Gem, bracelet: Watch, eyewear: Eye, hair: Star };
 /** The slot table with its Lucide icon attached (what the old OUTFIT_SLOTS was). */
@@ -34,15 +35,86 @@ export function PhotoButton({ onFile, busy, children, style, ariaLabel = "Add ph
   );
 }
 
+const fieldStyle = { width: "100%", fontFamily: F.body, fontSize: 14, padding: "11px 14px", border: `1.5px solid ${C.borderMedium}`, borderRadius: 12,
+  background: C.warmWhite, outline: "none", color: C.charcoal, boxSizing: "border-box" };
+const fieldLabel = { fontFamily: F.body, fontSize: 10.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".07em", color: C.softGray, marginBottom: 5, paddingLeft: 2 };
+
+/**
+ * "Add new <slot>" — the colour, the brand and the type of clothing in separate
+ * fields (Fields batch). The three compose into one item name ("Black Lululemon
+ * flowy pants"), previewed live with its colour swatch; Enter hops colour →
+ * brand → type, Enter on the type adds. Only the type is required.
+ */
+function NewPieceForm({ slot, brands, types, onAdd, onCancel }) {
+  const [color, setColor] = useState("");
+  const [brand, setBrand] = useState("");
+  const [type, setType] = useState("");
+  const colorRef = useRef(null), brandRef = useRef(null), typeRef = useRef(null);
+  useEffect(() => { colorRef.current?.focus(); }, []);
+  const name = composeItemName({ color, brand, type });
+  const preview = name ? parseItemMeta(name, structuredMeta({ color, brand, type }) || undefined) : null;
+  const swatch = preview ? swatchBackground(preview) : null;
+  const canAdd = !!type.trim();
+  const submit = (e) => { e?.preventDefault(); if (canAdd) onAdd({ color, brand, type }); };
+  const hop = (ref) => (e) => { if (e.key === "Enter") { e.preventDefault(); ref.current?.focus(); } };
+  const slotWord = slot.label.toLowerCase().replace(/\s*\(.*\)|\s*\/.*$/g, "");   // "Necklace(s)" → "necklace", "Bag / Purse" → "bag"
+  return (
+    <form onSubmit={submit} aria-label={`New ${slotWord}`}
+      style={{ background: C.warmWhite, border: `1.5px solid ${C.copper}40`, borderRadius: 16, padding: 14, boxShadow: `0 2px 12px ${C.shadow}` }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+        <label style={{ minWidth: 0 }}>
+          <div style={fieldLabel}>Colour</div>
+          <input ref={colorRef} value={color} onChange={(e) => setColor(e.target.value)} placeholder="e.g. Black" aria-label="Piece colour"
+            list="pp-piece-colours" autoComplete="off" autoCapitalize="sentences" enterKeyHint="next" onKeyDown={hop(brandRef)} style={fieldStyle}
+            onFocus={(e) => (e.target.style.borderColor = C.copper)} onBlur={(e) => (e.target.style.borderColor = C.borderMedium)} />
+        </label>
+        <label style={{ minWidth: 0 }}>
+          <div style={fieldLabel}>Brand <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>· optional</span></div>
+          <input ref={brandRef} value={brand} onChange={(e) => setBrand(e.target.value)} placeholder="e.g. Lululemon" aria-label="Piece brand"
+            list="pp-piece-brands" autoComplete="off" autoCapitalize="words" enterKeyHint="next" onKeyDown={hop(typeRef)} style={fieldStyle}
+            onFocus={(e) => (e.target.style.borderColor = C.copper)} onBlur={(e) => (e.target.style.borderColor = C.borderMedium)} />
+        </label>
+      </div>
+      <label style={{ display: "block", marginBottom: 12 }}>
+        <div style={fieldLabel}>Type of clothing</div>
+        <input ref={typeRef} value={type} onChange={(e) => setType(e.target.value)} placeholder={slot.typePlaceholder || "e.g. flowy pants"} aria-label="Piece type"
+          list="pp-piece-types" autoComplete="off" autoCapitalize="none" enterKeyHint="done" style={fieldStyle}
+          onFocus={(e) => (e.target.style.borderColor = C.copper)} onBlur={(e) => (e.target.style.borderColor = C.borderMedium)} />
+      </label>
+      <datalist id="pp-piece-colours">{COLOR_FAMILY_IDS.map((id) => <option key={id} value={id.replace(/\b\p{L}/gu, (ch) => ch.toUpperCase())} />)}</datalist>
+      <datalist id="pp-piece-brands">{brands.map((b) => <option key={b} value={b} />)}</datalist>
+      <datalist id="pp-piece-types">{types.map((t) => <option key={t} value={t} />)}</datalist>
+
+      {/* Live preview of the piece as it will be named */}
+      <div aria-label="New piece preview" style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 22, marginBottom: 12, paddingLeft: 2 }}>
+        {swatch ? (
+          <span style={{ width: 12, height: 12, borderRadius: 6, background: swatch, flexShrink: 0,
+            border: `1px solid ${preview.color === "white" || preview.color === "cream" ? C.borderMedium : "rgba(45,41,38,.12)"}` }} />
+        ) : (
+          <span style={{ width: 12, height: 12, borderRadius: 6, flexShrink: 0, border: `1px dashed ${C.borderMedium}` }} />
+        )}
+        {preview?.brand && <span style={{ fontFamily: F.body, fontSize: 9, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".05em", color: C.softGray }}>{preview.brand}</span>}
+        <span style={{ fontFamily: F.body, fontSize: 13.5, fontWeight: name ? 500 : 400, color: name ? C.charcoal : C.softGray, fontStyle: name ? "normal" : "italic",
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {name || `What the ${slotWord} will be called`}
+        </span>
+      </div>
+
+      <div style={{ display: "flex", gap: 10 }}>
+        <Btn v="secondary" sz="sm" type="button" onClick={onCancel} style={{ flex: 1 }}>Cancel</Btn>
+        <Btn v="primary" sz="sm" type="submit" disabled={!canAdd} aria-disabled={!canAdd} style={{ flex: 2 }}><Plus size={14} /> Add {slotWord}</Btn>
+      </div>
+    </form>
+  );
+}
+
 export function OutfitEditor({ title, subtitle, name, onName, namePlaceholder = "Name this outfit", slots, onSlots,
   wardrobe, setWardrobe, wardrobeMeta, setWardrobeMeta, photo, onPickPhoto, onRemovePhoto, photoBusy, photoError,
   footer, onDone, onCancel, doneLabel = "Done", startSlot = 0 }) {
   const [slotIdx, setSlotIdx] = useState(startSlot);
   const [addingNew, setAddingNew] = useState(false);
-  const [newItemVal, setNewItemVal] = useState("");
-  const newRef = useRef(null);
-  useEffect(() => { if (addingNew && newRef.current) newRef.current.focus(); }, [addingNew]);
   useEffect(() => { window.scrollTo(0, 0); }, [slotIdx]);
+  useEffect(() => { setAddingNew(false); }, [slotIdx]);
 
   const totalSlots = OUTFIT_SLOTS.length;
   const currentSlot = OUTFIT_SLOTS[slotIdx];
@@ -70,6 +142,23 @@ export function OutfitEditor({ title, subtitle, name, onName, namePlaceholder = 
   const goNext = () => { if (slotIdx < totalSlots - 1) setSlotIdx((s) => s + 1); else onDone?.("done"); };
   const goPrev = () => { if (slotIdx > 0) setSlotIdx((s) => s - 1); };
   const src = photoSrc(photo);
+
+  // "Add new …": compose the name from the fields, reuse an identical piece the
+  // wardrobe already holds (case-insensitive), remember what was typed.
+  const brandSuggestions = useMemo(() => wardrobeBrands(wardrobe, wardrobeMeta), [wardrobe, wardrobeMeta]);
+  const typeSuggestions = useMemo(() => wardrobeTypes(wardrobe, wardrobeMeta, currentSlot.id), [wardrobe, wardrobeMeta, currentSlot.id]);
+  const addPiece = (fields) => {
+    const composed = composeItemName(fields);
+    if (!composed) return;
+    const sid = currentSlot.id;
+    const existing = (wardrobe?.[sid] || []).find((i) => i.toLowerCase() === composed.toLowerCase());
+    const finalName = existing || composed;
+    const meta = structuredMeta(fields);
+    if (meta && !existing) setWardrobeMeta?.((prev) => ({ ...(prev || {}), [finalName]: { ...((prev || {})[finalName] || {}), ...meta } }));   // an existing piece keeps its own details
+    const alreadyOn = selectedIsMulti ? selectedValue.includes(finalName) : selectedValue === finalName;
+    if (!alreadyOn) setSlotValue(finalName, true);
+    setAddingNew(false);
+  };
 
   return (
     <div style={{ minHeight: "100vh", background: `linear-gradient(180deg, #FFF8F2 0%, ${C.cream} 100%)` }}>
@@ -191,20 +280,14 @@ export function OutfitEditor({ title, subtitle, name, onName, namePlaceholder = 
             <div style={{ fontFamily: F.body, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: C.warmGray, marginBottom: 10, paddingLeft: 4 }}>Your wardrobe</div>
           )}
           <WardrobeCarousel slotId={currentSlot.id} wardrobe={wardrobe || {}} wardrobeMeta={wardrobeMeta}
-            onSetMeta={(n, patch) => setWardrobeMeta?.((prev) => { const next = { ...(prev || {}) }; if (patch) next[n] = patch; else delete next[n]; return next; })}
+            onSetMeta={(n, patch) => setWardrobeMeta?.((prev) => { const next = { ...(prev || {}) }; const entry = applyMetaPatch(next[n], patch); if (entry) next[n] = entry; else delete next[n]; return next; })}
             onSelect={(item) => setSlotValue(item, true)} selected={selectedValue}
             onRemoveItem={(item) => setWardrobe?.((prev) => ({ ...(prev || {}), [currentSlot.id]: ((prev || {})[currentSlot.id] || []).filter((i) => i !== item) }))} />
         </div>
 
-        {/* Add new item */}
+        {/* Add new item — colour / brand / type in separate fields */}
         {addingNew ? (
-          <form onSubmit={(e) => { e.preventDefault(); if (newItemVal.trim()) { setSlotValue(newItemVal.trim(), true); setNewItemVal(""); setAddingNew(false); } }} style={{ display: "flex", gap: 10 }}>
-            <input ref={newRef} value={newItemVal} onChange={(e) => setNewItemVal(e.target.value)} placeholder={currentSlot.placeholder}
-              onBlur={() => { if (!newItemVal.trim()) setTimeout(() => setAddingNew(false), 150); }}
-              style={{ flex: 1, fontFamily: F.body, fontSize: 14, padding: "12px 16px", border: `1.5px solid ${C.borderMedium}`, borderRadius: 12, background: C.warmWhite, outline: "none", color: C.charcoal }}
-              onFocus={(e) => (e.target.style.borderColor = C.copper)} />
-            <Btn v="primary" sz="sm" onClick={() => { if (newItemVal.trim()) { setSlotValue(newItemVal.trim(), true); setNewItemVal(""); setAddingNew(false); } }}>Add</Btn>
-          </form>
+          <NewPieceForm key={currentSlot.id} slot={currentSlot} brands={brandSuggestions} types={typeSuggestions} onAdd={addPiece} onCancel={() => setAddingNew(false)} />
         ) : (
           <button onClick={() => setAddingNew(true)}
             style={{ width: "100%", padding: "14px 18px", borderRadius: 14, border: `2px dashed ${C.borderMedium}`, background: C.copperSubtle, cursor: "pointer",
