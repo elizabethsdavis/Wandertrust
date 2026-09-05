@@ -1,0 +1,109 @@
+// Outfit photos (Outfits batch).
+//
+// The whole PackPal state is ONE Firestore document capped at 1 MiB, so photos
+// never go in it. In cloud mode the resized photo is uploaded to Firebase
+// Storage at outfits/{uid}/{outfitId}.jpg (storage.rules: owner only) and the
+// outfit keeps { url, path, thumb } — a download URL plus a tiny inline
+// thumbnail (~80 px, ~2 KB) so grids render instantly and offline. In local
+// mode (no Firebase) the outfit keeps { dataUrl, thumb } — a 320 px JPEG data
+// URL, which localStorage can afford.
+//
+// preparePhoto() does the resizing in the browser (canvas), so the upload is
+// ~100–250 KB instead of a 4 MB camera original.
+import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
+import { app, LOCAL_MODE } from "./firebase";
+
+export const storage = LOCAL_MODE || !app ? null : getStorage(app);
+
+export const PHOTO_MAX_PX = 1200; // longest edge of the uploaded image
+export const PHOTO_LOCAL_PX = 320; // longest edge of the local-mode data URL
+export const THUMB_PX = 80; // inline thumbnail (lives in the state blob)
+
+/** True when this build can upload to Firebase Storage. */
+export const photosUseStorage = () => !!storage;
+
+/** What to show for an outfit's photo (largest available); null when none. */
+export function photoSrc(photo) {
+  if (!photo || typeof photo !== "object") return null;
+  return photo.url || photo.dataUrl || photo.thumb || null;
+}
+
+/** The small version for grids / pickers. */
+export function photoThumb(photo) {
+  if (!photo || typeof photo !== "object") return null;
+  return photo.thumb || photo.dataUrl || photo.url || null;
+}
+
+async function loadBitmap(file) {
+  if (typeof createImageBitmap === "function") {
+    try {
+      return await createImageBitmap(file, { imageOrientation: "from-image" });
+    } catch {
+      /* fall through to <img> */
+    }
+  }
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Couldn't read that image.")); };
+    img.src = url;
+  });
+}
+
+function drawScaled(src, maxPx) {
+  const w = src.width || src.naturalWidth, h = src.height || src.naturalHeight;
+  const scale = Math.min(1, maxPx / Math.max(w, h));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(w * scale));
+  canvas.height = Math.max(1, Math.round(h * scale));
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
+const toBlob = (canvas, quality) => new Promise((resolve) => canvas.toBlob((b) => resolve(b), "image/jpeg", quality));
+
+/**
+ * preparePhoto(file) → { blob, thumb, dataUrl, width, height }
+ *   blob     JPEG ≤ PHOTO_MAX_PX for Storage
+ *   thumb    JPEG data URL ≤ THUMB_PX (goes in the state blob)
+ *   dataUrl  JPEG data URL ≤ PHOTO_LOCAL_PX (local mode only, else null)
+ */
+export async function preparePhoto(file, { forLocal = !photosUseStorage() } = {}) {
+  if (!file || !/^image\//.test(file.type || "")) throw new Error("Pick a photo (JPEG, PNG, HEIC…).");
+  const src = await loadBitmap(file);
+  const big = drawScaled(src, PHOTO_MAX_PX);
+  const blob = await toBlob(big, 0.82);
+  const thumb = drawScaled(big, THUMB_PX).toDataURL("image/jpeg", 0.6);
+  const dataUrl = forLocal ? drawScaled(big, PHOTO_LOCAL_PX).toDataURL("image/jpeg", 0.7) : null;
+  if (typeof src.close === "function") src.close();
+  return { blob, thumb, dataUrl, width: big.width, height: big.height };
+}
+
+/** Storage path for an outfit's photo. */
+export const outfitPhotoPath = (uid, outfitId) => `outfits/${uid}/${outfitId}.jpg`;
+
+/**
+ * savePhoto({ uid, outfitId, file }) → the `photo` value to store on the outfit.
+ * Cloud: uploads and returns { url, path, thumb }. Local: returns { dataUrl, thumb }.
+ */
+export async function savePhoto({ uid, outfitId, file }) {
+  const prepared = await preparePhoto(file);
+  if (!photosUseStorage() || !uid) return { dataUrl: prepared.dataUrl || prepared.thumb, thumb: prepared.thumb };
+  const path = outfitPhotoPath(uid, outfitId);
+  const r = ref(storage, path);
+  await uploadBytes(r, prepared.blob, { contentType: "image/jpeg", cacheControl: "public,max-age=31536000" });
+  const url = await getDownloadURL(r);
+  return { url, path, thumb: prepared.thumb };
+}
+
+/** Best-effort removal of the stored file (the outfit record is the caller's job). */
+export async function deletePhoto(photo) {
+  if (!photo?.path || !photosUseStorage()) return;
+  try {
+    await deleteObject(ref(storage, photo.path));
+  } catch (e) {
+    console.warn("[PackPal] Could not delete photo:", e?.message || e);
+  }
+}

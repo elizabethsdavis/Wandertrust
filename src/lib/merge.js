@@ -73,6 +73,7 @@ function mergeTrip(base, local, remote) {
     items: (b, l, r) => mergeById(b, l, r, byId, (bi, li, ri) => mergeFields(bi, li, ri)),
     otdItems: (b, l, r) => mergeById(b, l, r, byName),
     otdChecked: (b, l, r) => mergeFields(b, l, r),
+    // outfitIds (the trip's outfit shortlist) is a small id list edited as a whole: local wins (generic rule).
     dayEmojis: (b, l, r) => mergeFields(b, l, r),
     // outfitPlan is edited as a whole in the Outfit Builder; if both devices
     // re-planned outfits at the same time, the one in your hand wins.
@@ -102,6 +103,7 @@ export function mergeState(base, local, remote) {
     customOccasions: (b, l, r) => mergeById(b, l, r, byId),
     otdItems: (b, l, r) => mergeById(b, l, r, byName),
     catalogTemplate: (b, l, r) => (isObj(l) && isObj(r) ? mergeFields(b, l, r) : l),
+    savedOutfits: (b, l, r) => mergeById(b, l, r, byId, (bi, li, ri) => mergeFields(bi, li, ri)),
   };
   return mergeFields(base, local, remote, (k) => deep[k]);
 }
