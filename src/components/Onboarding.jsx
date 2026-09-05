@@ -40,6 +40,7 @@ export default function Onboarding() {
   const [, setWardrobeMeta] = usePersist("wardrobeMeta", {});
   const [, setAddins] = usePersist("addins", null);
   const [, setCategoryMeta] = usePersist("categoryMeta", {});
+  const [, setSavedOutfits] = usePersist("savedOutfits", []);
 
   const [importStarters, setImportStarters] = useState(false);
   const [bringLocal, setBringLocal] = useState(true);
@@ -69,6 +70,8 @@ export default function Onboarding() {
     const wardrobeMeta = read("wardrobeMeta", {}) || {};
     const addins = read("addins", null);
     const categoryMeta = read("categoryMeta", {}) || {};
+    const soRaw = read("savedOutfits", []);
+    const savedOutfits = Array.isArray(soRaw) ? soRaw : [];
     const completed = trips.filter(
       (t) => Array.isArray(t.items) && t.items.length > 0 && t.items.every((i) => i.packed)
     ).length;
@@ -81,10 +84,11 @@ export default function Onboarding() {
       wardrobeMeta,
       addins,
       categoryMeta,
+      savedOutfits,
       completed,
       active: trips.length - completed,
       hasExtras:
-        customOccasions.length > 0 || Object.keys(wardrobe).length > 0 || otdItems.length > 0,
+        customOccasions.length > 0 || Object.keys(wardrobe).length > 0 || otdItems.length > 0 || savedOutfits.length > 0,
     };
   }, []);
   const hasLocal = localData.trips.length > 0;
@@ -118,6 +122,7 @@ export default function Onboarding() {
         if (Object.keys(localData.wardrobeMeta).length) setWardrobeMeta(localData.wardrobeMeta);
         if (localData.addins) setAddins(localData.addins);
         if (Object.keys(localData.categoryMeta || {}).length) setCategoryMeta(localData.categoryMeta);
+        if (localData.savedOutfits.length) setSavedOutfits(localData.savedOutfits);
       }
       if (importStarters) merged.push(...buildStarterTrips());
       if (merged.length) setTrips(merged);
