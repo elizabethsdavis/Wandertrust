@@ -1,0 +1,21 @@
+rules_version = '2';
+
+// PackPal Cloud Storage rules — outfit photos.
+// Each signed-in user may read / write only under outfits/{their uid}/, images
+// only, 3 MB max (the app uploads ~1200px JPEGs of 100–250 KB). Everything
+// else in the bucket is denied.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /outfits/{uid}/{file} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if request.auth != null && request.auth.uid == uid
+                   && request.resource.size < 3 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -17,6 +17,7 @@ the *gotchas*.
 | Auth | **Firebase Authentication** | Phone OTP (SMS) primary; **passkeys** (WebAuthn) for fast re-login. |
 | Database / storage | **Cloud Firestore** | One JSON blob per user (whole app state). |
 | Serverless | **Firebase Cloud Functions** (2nd gen, *callable*) | Only used for passkeys (WebAuthn verify + session minting). |
+| Files | **Cloud Storage for Firebase** | Outfit photos only (`outfits/{uid}/{outfitId}.jpg`, owner-only rules); the state doc keeps the URL + a 2 KB thumb. |
 | Client auth lib | `firebase` (modular SDK) | `firebase/app`, `/auth`, `/firestore`, `/functions`. |
 | WebAuthn | `@simplewebauthn/browser` (client) + `@simplewebauthn/server` (functions) | Pin matching majors. |
 
@@ -146,6 +147,7 @@ users/{uid}        { phone, onboarded, createdAt }      // client rw (own)
 state/{uid}        { state: "<json string>", updatedAt } // client rw (own)
 credentials/{auto} { uid, credentialId, publicKey, counter, ... } // server only
 challenges/{auto}  { uid?, challenge, kind, createdAt }  // server only, short-lived
+Storage: outfits/{uid}/{outfitId}.jpg                    // client rw (own), images < 3 MB — storage.rules
 ```
 
 Rules: a signed-in user reads/writes only their own `users` + `state` docs.

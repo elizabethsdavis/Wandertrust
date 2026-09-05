@@ -108,6 +108,21 @@ This deploys `passkeyRegister` and `passkeyAuth` (default region `us-central1` �
 
 ---
 
+## 6b. Cloud Storage — outfit photos (Outfits batch)
+
+Outfit photos are uploaded to your project's Storage bucket (the app data doc is capped at 1 MiB, so they can't live there). One-time:
+
+1. Firebase console → **Build → Storage → Get started** → *Start in production mode* → pick the same region as Firestore (`us-west2`). The default bucket is the one already in `VITE_FIREBASE_STORAGE_BUCKET`.
+2. Deploy the rules from this repo (owner-only under `outfits/{uid}/`, images, < 3 MB):
+
+```bash
+firebase deploy --only storage
+```
+
+Until this is done, adding a photo shows "Couldn't add that photo" and nothing else changes. Photos are resized in the browser to ~1200 px JPEG (100–250 KB each); the free tier (5 GB) covers thousands. No Vercel env change is needed.
+
+---
+
 ## 7. Deploy to Vercel
 
 The app already has `vercel.json`. In your Vercel project:
@@ -127,6 +142,7 @@ The app already has `vercel.json`. In your Vercel project:
 - [ ] **Sync:** add/check items on one device → sign in on another → changes are there.
 - [ ] **Passkey register:** Account → "Add Face ID / passkey" → biometric prompt → success.
 - [ ] **Passkey login:** sign out → "Sign in with Face ID" → straight in, no SMS.
+- [ ] **Outfit photo:** Home → My Outfits → an outfit → Add photo → the card shows it after a reload (it came back from Storage).
 
 ---
 
@@ -156,7 +172,8 @@ src/components/Onboarding.jsx One-time setup (import 22 lists / bring local / pa
 src/main.jsx               Provider tree + auth/onboarding gating
 src/PackPal.jsx            Unchanged logic; usePersist imported; AccountBadge added
 firestore.rules            Per-user access; server-only passkey collections
-firebase.json              Firestore + Functions deploy config
+storage.rules              Outfit photos: owner-only under outfits/{uid}/
+firebase.json              Firestore + Storage + Functions deploy config
 functions/index.js         passkeyRegister, passkeyAuth (callable, gen 2)
 functions/.env.example     WEBAUTHN_RP_ID / RP_NAME / ORIGIN
 ```

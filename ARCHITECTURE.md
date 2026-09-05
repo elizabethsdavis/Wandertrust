@@ -38,7 +38,7 @@ and **lights up cloud features when configured**. The guiding principles:
                             reorder, exportList, wardrobe
                                       │
                                       ▼
-                            Firebase (Auth · Firestore · Functions)
+                            Firebase (Auth · Firestore · Functions · Storage)
                             functions/  +  firestore.rules
 ```
 
@@ -56,6 +56,7 @@ keep the graph honest.
 | `content.js` | `UNFREEZE_STEPS` + `AFFIRMATIONS` — Freak Out mode copy. |
 | `history.js` | `HIST_TRIPS` — the 22 historical trips (also the onboarding starter import). |
 | `otdDefaults.js` | `DEFAULT_OTD_ITEMS` — the default Out-the-Door checklist. |
+| `outfitSlots.js` | `OUTFIT_SLOT_DEFS` / `SLOT_IDS` — the nine frozen outfit slots (top … hair), pure; the editor attaches the icons. |
 
 ### `src/lib/` — pure logic + infrastructure
 | File | Responsibility |
@@ -80,6 +81,8 @@ keep the graph honest.
 | `tripStatus.js` | `isPastTrip()` / `tripEndDate()` / `endedLabel()` — derived (never stored) "this trip is over" status for the read-only lock and the Home grouping. |
 | `version.js` | `APP_VERSION` (build stamp), `fetchDeployedVersion()`, `reloadApp(flush)`, `useUpdateAvailable()` — the reload button and the "newer version" banner. |
 | `categories.js` | `resolveCategories(meta)` — `CATEGORIES` with the user's label / emoji overrides (`categoryMeta` key) applied; `setCategoryOverride()`, `isCategoryOverridden()`, `EMOJI_SUGGESTIONS`. Render category names from this, never from `CATEGORIES` directly. |
+| `outfits.js` | The closet's pure logic (`savedOutfits` key): `newOutfit` / `updateOutfit`, `slotsKey` (de-dupe by pieces), `assignOutfit` / `detachOutfit` / `propagateOutfit` (trip occasions ↔ saved outfits), `collectOutfitItems` (packing sync = plan ∪ shortlist), `importOutfitsFromTrips` + `linkImportedOutfits`, `forgetOutfitInTrips`, `outfitUsage`. |
+| `photos.js` | Outfit photos: `preparePhoto()` (canvas resize → ≤1200 px JPEG + ~80 px thumb), `savePhoto()` (Firebase Storage `outfits/{uid}/{outfitId}.jpg` in cloud mode, a 320 px data URL in local mode), `deletePhoto()`, `photoSrc()` / `photoThumb()`. The only module that imports `firebase/storage`. |
 
 ### `src/components/` — presentational + flow screens
 Flow screens: `AuthGate.jsx` (phone → OTP → passkey sign-in), `Account.jsx`
@@ -87,7 +90,13 @@ Flow screens: `AuthGate.jsx` (phone → OTP → passkey sign-in), `Account.jsx`
 (one-time setup + import), `TemplateEditor.jsx` (two tabs — the packing
 template and its trip-type / weather add-ins — with per-item refill / charge /
 laundry toggles and drag-and-drop ordering), `TemplateSync.jsx` ("Save to
-template": diff the open trip against the template, tick, apply).
+template": diff the open trip against the template, tick, apply),
+`OutfitBuilder.jsx` (a trip's outfits: the **Outfits** tab = the trip's
+shortlist of saved outfits, the **Days** tab = which outfit each day's
+occasions wear, with day-only tweaks), `Closet.jsx` (Home → My Outfits: every
+saved outfit with photo, rename, edit, delete, import from past trips),
+`OutfitEditor.jsx` (the slot-by-slot editor both of those open; name + photo
+in its header).
 
 Props-only leaf components (no store access; extracted from `PackPal.jsx`):
 `ui.jsx` (`ProgressRing`, `Btn`, `MiniBar`), `PackList.jsx` (`PackItem`,
@@ -100,14 +109,16 @@ items), `WardrobeMetaPicker.jsx` (fix a wardrobe item's colour / brand),
 `UpdateBanner.jsx` (mounted in `main.jsx`; "a newer version is ready"),
 `dnd.jsx` (shared dnd-kit sensors + grip handle for Arrange mode and the
 template editor), `EmojiPicker.jsx` (bottom sheet: suggestions + type any
-emoji; trip emoji and category emoji).
+emoji; trip emoji and category emoji), `WardrobeCarousel.jsx` (one slot's
+wardrobe items with colour / brand swatches), `OutfitCard.jsx` (`OutfitCard`,
+`OutfitVisual` — photo or piece collage, `PieceList`, `Sheet`, `OutfitPicker`).
 
 ### `src/PackPal.jsx` — the application
 State, CRUD, view routing, and the views that are wired tightly into trip state:
-Home, the new-trip wizard, the trip view, and the two in-file components
-`OutTheDoor` and `OutfitBuilder` (~2.3k lines). The open trip is *derived*
-(`activeTripId` + a lookup into `trips`), so every mutation goes through
-`setTrips` exactly once. See "What's next" for the remaining decomposition.
+Home, the new-trip wizard, the trip view, and the one remaining in-file
+component `OutTheDoor` (~1.6k lines; `OutfitBuilder` moved to `components/` in
+the Outfits batch). The open trip is *derived* (`activeTripId` + a lookup into
+`trips`), so every mutation goes through `setTrips` exactly once.
 
 ### `public/` — static files served as-is
 The Home Screen / PWA bits: `apple-touch-icon.png`, `icon-192.png`,
@@ -202,12 +213,12 @@ Supabase → Firebase migration was done).
 
 ## What's next (intentional debt)
 
-The props-only leaf components are out of `src/PackPal.jsx` (3.5k → 2.3k lines).
-What remains in-file is deliberate: `OutTheDoor` and `OutfitBuilder` reach into
-trip state and callbacks in ways the leaf components don't, and the audit flagged
-them as the risky extractions. Move them one at a time, and after each move run
-**both** harnesses — `scripts/browser-checks.py` (local mode, 95 checks, with
-screenshots you can pixel-diff against the previous run) and
-`scripts/cloud-checks.py` (cloud mode, 40 checks). Smaller nits still open:
+The props-only leaf components are out of `src/PackPal.jsx` (3.5k → 2.3k → 1.6k
+lines; the Outfits batch rewrote `OutfitBuilder` as a component). What remains
+in-file is deliberate: `OutTheDoor` reaches into trip state and callbacks in
+ways the leaf components don't, and the audit flagged it as a risky extraction.
+Move it with **both** harnesses run afterwards — `scripts/browser-checks.py`
+(local mode, 130 checks, with screenshots you can pixel-diff against the
+previous run) and `scripts/cloud-checks.py` (cloud mode, 46 checks). Smaller nits still open:
 a few lists keyed by array index, and recurring inline hexes that could become
 `theme.js` tokens.
