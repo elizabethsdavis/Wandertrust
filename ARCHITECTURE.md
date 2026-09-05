@@ -76,7 +76,7 @@ keep the graph honest.
 | `template.js` | The packing template's pure logic: `templateBase()`, `expectedTemplateItems()`, `diffTripAgainstTemplate()`, `applyTemplateChanges()`, the `FLAGS` (refill / charge / laundry). |
 | `reorder.js` | `moveSection()` / `moveItem()` — rebuild `trip.items` for Arrange mode (order *is* array order). |
 | `exportList.js` | `tripToMarkdown()` / `markdownFileName()` — the shareable Markdown checklist. |
-| `wardrobe.js` | `parseItemMeta()` (colour family + shade + two-tone, pattern, brand from capitalization / known brands), `swatchBackground()`, `colorToHex()`; manual overrides come from the `wardrobeMeta` key. |
+| `wardrobe.js` | `parseItemMeta()` (colour family + shade + two-tone, pattern, brand from capitalization / known brands), `swatchBackground()`, `colorToHex()`; manual overrides come from the `wardrobeMeta` key. Fields batch: `composeItemName()` builds the "<Colour> <Brand> <type>" name from the editor's three fields, `structuredMeta()` / `applyMetaPatch()` keep what was typed (`colorName`, `type`) next to the overrides, `wardrobeBrands()` / `wardrobeTypes()` feed the form's suggestions. |
 | `addins.js` | Trip-type / weather add-ins (the `addins` key; defaults = `COND_ITEMS`): `addinItemsFor()` for `genList`, `detectConditions()` (rain / snow from forecast text), `WEATHER_KEYS` / `TYPE_KEYS` for the editor. |
 | `tripStatus.js` | `isPastTrip()` / `tripEndDate()` / `endedLabel()` — derived (never stored) "this trip is over" status for the read-only lock and the Home grouping. |
 | `version.js` | `APP_VERSION` (build stamp), `fetchDeployedVersion()`, `reloadApp(flush)`, `useUpdateAvailable()` — the reload button and the "newer version" banner. |
@@ -105,12 +105,15 @@ Props-only leaf components (no store access; extracted from `PackPal.jsx`):
 `FocusCharge.jsx`, `FocusLaundry.jsx`, `SmartRecsView.jsx`, `Insights.jsx`,
 `GlobalOtdEditor.jsx`, `ShareSheet.jsx` (copy / native share / download the
 Markdown export), `ArrangeList.jsx` (dnd-kit drag-and-drop of sections and
-items), `WardrobeMetaPicker.jsx` (fix a wardrobe item's colour / brand),
+items), `WardrobeMetaPicker.jsx` (fix a wardrobe item's colour / brand; the typed
+colour / type fields survive its Save and Auto),
 `UpdateBanner.jsx` (mounted in `main.jsx`; "a newer version is ready"),
 `dnd.jsx` (shared dnd-kit sensors + grip handle for Arrange mode and the
 template editor), `EmojiPicker.jsx` (bottom sheet: suggestions + type any
 emoji; trip emoji and category emoji), `WardrobeCarousel.jsx` (one slot's
-wardrobe items with colour / brand swatches), `OutfitCard.jsx` (`OutfitCard`,
+wardrobe items with colour / brand swatches), `OutfitEditor.jsx` (the slot-by-slot
+editor; its `NewPieceForm` takes colour / brand / type in separate fields and
+composes the piece name), `OutfitCard.jsx` (`OutfitCard`,
 `OutfitVisual` — photo or piece collage, `PieceList`, `Sheet`, `OutfitPicker`).
 
 ### `src/PackPal.jsx` — the application

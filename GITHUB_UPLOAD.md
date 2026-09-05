@@ -50,6 +50,10 @@ python3 scripts/upload-plan.py "Batch name"   # e.g. "Home Screen", "Renames & I
 This writes `../PackPal-github-upload/` (next to the repo, never inside it) with
 byte-for-byte copies of every added / modified file, plus `UPLOAD_PLAN.md`
 listing the steps. `--check` prints the plan without writing anything.
+Root-level files (docs, `package.json`, `firebase.json`, …) are placed under
+`ROOT/` so that `UPLOAD_PLAN.md` is the only thing at the bundle's top level —
+it is a checklist, never something to upload (it once rode into the repo with
+the root files and had to be deleted again).
 
 The plan orders folders so that **every intermediate Vercel build stays
 green** (each upload deploys on its own, so a file that imports a not-yet-
@@ -168,7 +172,7 @@ local commits for GitHub's equivalents. Then:
 | Thing | Value |
 |-------|-------|
 | Repo on the Mac | `~/Documents/Claude/Projects/PackPal` (VM: `$HOME/mnt/Projects/PackPal`) |
-| Bundle folder | `~/Documents/Claude/Projects/PackPal-github-upload/` |
+| Bundle folder | `~/Documents/Claude/Projects/PackPal-github-upload/` (root files under `ROOT/`; `UPLOAD_PLAN.md` is not uploaded) |
 | Upload URL | `https://github.com/elizabethsdavis/wandertrust/upload/main/<folder>` (root: no `<folder>`) |
 | Delete URL | `https://github.com/elizabethsdavis/wandertrust/blob/main/<path>` → trash icon |
 | Vercel | project `prj_gBjXgMnzGIdgQs1ST6tJ03R08Uec`, team `team_WEizNhF8qWNse8CYAUdb9exr`, prod `https://wandertrust.vercel.app` |

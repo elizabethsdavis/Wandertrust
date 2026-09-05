@@ -121,6 +121,8 @@ firebase deploy --only storage
 
 Until this is done, adding a photo shows "Couldn't add that photo" and nothing else changes. Photos are resized in the browser to ~1200 px JPEG (100–250 KB each); the free tier (5 GB) covers thousands. No Vercel env change is needed.
 
+**Done for `packpal-6f1a8` on 2026-09-05** (bucket `gs://packpal-6f1a8.firebasestorage.app`, US-WEST2; rules published from the console's Rules tab). Gotcha hit on the way: if *Get started* never appears and the Storage page says "Repair project permissions" / attaching permissions fails, the **Cloud Storage for Firebase API** is disabled — enable it at `console.cloud.google.com/apis/api/firebasestorage.googleapis.com/overview?project=packpal-6f1a8`, reload the Storage page and run *Get started* from there. The console's Rules tab is an alternative to step 2 (paste `storage.rules`, Publish, then check with the Rules Playground).
+
 ---
 
 ## 7. Deploy to Vercel
