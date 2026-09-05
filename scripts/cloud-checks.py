@@ -309,7 +309,7 @@ def run(page, dialog, ctx):
     page.get_by_role("button", name=re.compile(r"^My Outfits")).click(); page.get_by_role("heading", name="Your closet").wait_for()
     page.get_by_role("button", name="New outfit").click(); page.get_by_role("button", name=re.compile(r"^Add new top")).wait_for()
     page.get_by_label("Outfit name").fill("Cloud look")
-    page.get_by_role("button", name=re.compile(r"^Add new top")).click(); inp = page.locator("input[placeholder^='e.g. ']").first; inp.fill("Navy blazer"); inp.press("Enter"); page.wait_for_timeout(500)
+    page.get_by_role("button", name=re.compile(r"^Add new top")).click(); inp = page.get_by_label("Piece type"); inp.fill("Navy blazer"); inp.press("Enter"); page.wait_for_timeout(500)
     page.get_by_role("button", name="Save outfit").first.click(); page.get_by_role("dialog", name="Outfit Cloud look").wait_for()
     from PIL import Image; import io
     buf = io.BytesIO(); Image.new("RGB", (800, 1000), (139, 168, 136)).save(buf, format="PNG")

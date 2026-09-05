@@ -1,4 +1,4 @@
-"""PackPal browser regression checks (Tier 1 + Tier 2 audit fixes, the UX / Home Screen / rename batches, and the Outfits batch O1–O14).
+"""PackPal browser regression checks (Tier 1 + Tier 2 audit fixes, the UX / Home Screen / rename batches, the Outfits batch O1–O14 and the Fields batch F1–F5).
 
 Drives the production build in LOCAL_MODE (no Firebase env, pure localStorage)
 with Playwright + Chromium and asserts each audit fix from a real browser:
@@ -213,9 +213,13 @@ with sync_playwright() as p:
     page.get_by_role("button", name="Outfits", exact=False).first.click()
     page.get_by_role("button", name="New outfit").click()
     page.get_by_role("button", name=re.compile(r"^Add new top")).wait_for()
-    def add_in_current_slot(val):
+    def add_in_current_slot(val, color="", brand=""):
+        # Fields batch: the "Add new …" form has colour / brand / type fields; a bare type is free text exactly like the old single input
         page.get_by_role("button", name=re.compile(r"^Add (new|another) ")).click()
-        inp = page.locator("input[placeholder^='e.g. ']").first
+        page.get_by_label("Piece type").wait_for()
+        if color: page.get_by_label("Piece colour").fill(color)
+        if brand: page.get_by_label("Piece brand").fill(brand)
+        inp = page.get_by_label("Piece type")
         inp.fill(val); inp.press("Enter")
         page.wait_for_timeout(500)
     add_in_current_slot("Cream cashmere top")          # single slot → auto-advances to Bottoms
@@ -758,7 +762,74 @@ with sync_playwright() as p:
     page.get_by_role("button", name="Outfits", exact=False).first.click(); page.get_by_role("button", name="New outfit").click()
     page.get_by_role("button", name=re.compile(r"^Add new top")).wait_for(); page.get_by_role("button", name="Save outfit").first.click(); page.wait_for_timeout(200)
     ok(len(saved()) == 4, "O14 saving an empty new outfit discards it")
+
+    # ── F1–F5: the Fields batch — colour / brand / type entered separately, composed into one piece name ──
+    def wmeta(): return json.loads(page.evaluate("localStorage.getItem('pp2_wardrobeMeta') || '{}'"))
+    def wardrobe(): return json.loads(page.evaluate("localStorage.getItem('pp2_wardrobe') || '{}'"))
+    page.get_by_role("button", name="New outfit").click(); page.get_by_role("button", name=re.compile(r"^Add new top")).wait_for()
+    page.get_by_label("Outfit name").fill("Fields test")
+    page.get_by_role("button", name=re.compile(r"^Add new top")).click(); page.get_by_label("Piece colour").wait_for()
+    ok(page.evaluate("document.activeElement && document.activeElement.getAttribute('aria-label')") == "Piece colour", "F1 the form opens with the colour field focused")
+    page.get_by_label("Piece colour").fill("Black"); page.get_by_label("Piece brand").fill("Lululemon"); page.get_by_label("Piece type").fill("flowy pants")
+    ok(page.get_by_label("New piece preview").text_content() == "LululemonBlack Lululemon flowy pants", f"F1 live preview composes the name from the three fields ({page.get_by_label('New piece preview').text_content()!r})")
+    page.screenshot(path=f"{SHOTS}/15-new-piece-form.png")
+    page.get_by_role("button", name="Add top").click(); page.wait_for_timeout(500)   # single slot → auto-advances to Bottoms
+    ok(wardrobe().get("top", [])[-1] == "Black Lululemon flowy pants" and wmeta().get("Black Lululemon flowy pants") == {"colorName": "Black", "brand": "Lululemon", "type": "flowy pants"},
+       f"F1 the piece is named 'Black Lululemon flowy pants' and what was typed is kept in wardrobeMeta ({wmeta().get('Black Lululemon flowy pants')})")
+    page.evaluate("""() => { [...document.querySelectorAll('button')].filter(b=>b.style.height==='10px')[0].click(); }""")  # back to Top
+    page.wait_for_timeout(300)
+    ok(page.get_by_text("Black Lululemon flowy pants", exact=True).count() >= 1 and page.evaluate(SWATCH_JS, "Lululemon") == "rgb(45, 41, 38)",
+       "F1 the wardrobe card shows the brand chip and the black swatch, and the piece is the slot's pick")
+    # F2: Enter hops colour → brand → type, Enter on the type adds; brand optional; the type keeps its own casing
+    page.evaluate("""() => { [...document.querySelectorAll('button')].filter(b=>b.style.height==='10px')[1].click(); }""")  # Bottoms
+    page.wait_for_timeout(200)
+    page.get_by_role("button", name=re.compile(r"^Add new bottoms")).click(); page.get_by_label("Piece colour").wait_for()
+    page.keyboard.type("light pink"); page.keyboard.press("Enter")
+    ok(page.evaluate("document.activeElement && document.activeElement.getAttribute('aria-label')") == "Piece brand", "F2 Enter in the colour field moves to the brand field")
+    page.keyboard.press("Enter")
+    ok(page.evaluate("document.activeElement && document.activeElement.getAttribute('aria-label')") == "Piece type", "F2 Enter in the (empty) brand field moves to the type field")
+    page.keyboard.type("satin skirt"); page.keyboard.press("Enter"); page.wait_for_timeout(500)
+    ok(wardrobe().get("bottom", [])[-1] == "Light pink satin skirt" and wmeta().get("Light pink satin skirt") == {"colorName": "light pink", "type": "satin skirt"},
+       f"F2 Enter on the type adds 'Light pink satin skirt' (no brand key stored) ({wmeta().get('Light pink satin skirt')})")
+    # F3: Add is inert without a type; Cancel closes the form without adding
+    page.evaluate("""() => { [...document.querySelectorAll('button')].filter(b=>b.style.height==='10px')[1].click(); }""")  # back to Bottoms
+    page.wait_for_timeout(200); n_before = len(wardrobe().get("bottom", []))
+    page.get_by_role("button", name=re.compile(r"^Add new bottoms")).click(); page.get_by_label("Piece colour").wait_for()
+    page.get_by_label("Piece colour").fill("Blue"); page.get_by_role("button", name="Add bottoms").click(force=True); page.wait_for_timeout(200)   # aria-disabled → force the click to prove it is inert
+    ok(page.get_by_label("Piece colour").count() == 1 and len(wardrobe().get("bottom", [])) == n_before, "F3 'Add' does nothing until a type is entered (the form stays open)")
+    page.get_by_role("button", name="Cancel").click(); page.wait_for_timeout(200)
+    ok(page.get_by_label("Piece colour").count() == 0 and len(wardrobe().get("bottom", [])) == n_before, "F3 Cancel closes the form without adding anything")
+    # F4: re-entering an existing piece (different casing) picks it instead of duplicating it
+    page.evaluate("""() => { [...document.querySelectorAll('button')].filter(b=>b.style.height==='10px')[0].click(); }""")  # Top
+    page.wait_for_timeout(200)
+    add_in_current_slot("flowy pants", color="black", brand="lululemon")
+    tops = wardrobe().get("top", [])
+    ok(tops.count("Black Lululemon flowy pants") == 1 and not [t for t in tops if t.lower() == "black lululemon flowy pants" and t != "Black Lululemon flowy pants"],
+       f"F4 the same piece typed again (lower-case) selects the existing wardrobe item, no duplicate ({[t for t in tops if 'flowy' in t]})")
+    page.get_by_role("button", name="Save outfit").first.click(); page.wait_for_timeout(300)
+    so = saved(); ft = [o for o in so if o["name"] == "Fields test"]
+    ok(len(ft) == 1 and ft[0]["slots"].get("top") == "Black Lululemon flowy pants" and ft[0]["slots"].get("bottom") == "Light pink satin skirt" and ft[0]["slots"].get("bottom") != "Blue",
+       f"F4 the saved outfit holds the composed names ({ft[0]['slots'] if ft else so})")
+    # F5: the fix-it sheet keeps the structured fields (Auto too); a type-only entry stores nothing (free text as before)
+    page.get_by_role("button", name="Fields test", exact=True).first.click(); page.get_by_role("dialog", name="Outfit Fields test").wait_for()
+    page.get_by_role("button", name="Edit pieces").click(); page.get_by_role("button", name=re.compile(r"^Add new top")).wait_for()
+    row = page.locator("[title='Tap to fix the colour or brand']").filter(has_text="Lululemon").first; row.click()
+    page.get_by_role("heading", name="Fix details").wait_for()
+    page.get_by_role("button", name="Colour Blue").click(); page.get_by_role("button", name="Save", exact=True).last.click(); page.wait_for_timeout(300)   # .last = the sheet's Save (the editor header also says Save here)
+    ok(wmeta().get("Black Lululemon flowy pants") == {"colorName": "Black", "type": "flowy pants", "color": "blue"} and page.evaluate(SWATCH_JS, "Lululemon") == "rgb(123, 163, 201)",
+       f"F5 fixing the colour keeps colorName/type next to the override ({wmeta().get('Black Lululemon flowy pants')})")
+    row.click(); page.get_by_role("heading", name="Fix details").wait_for()
+    page.get_by_role("button", name="Auto").click(); page.wait_for_timeout(300)
+    ok(wmeta().get("Black Lululemon flowy pants") == {"colorName": "Black", "type": "flowy pants"} and page.evaluate(SWATCH_JS, "Lululemon") == "rgb(45, 41, 38)",
+       f"F5 'Auto' drops the override but keeps what was typed ({wmeta().get('Black Lululemon flowy pants')})")
+    page.evaluate("""() => { [...document.querySelectorAll('button')].filter(b=>b.style.height==='10px')[3].click(); }""")  # Shoes
+    page.wait_for_timeout(200); add_in_current_slot("Black Doc Martens")
+    ok("Black Doc Martens" in wardrobe().get("shoes", []) and "Black Doc Martens" not in wmeta(), "F5 a type-only entry is plain free text: named as typed, nothing stored in wardrobeMeta")
+    page.get_by_role("button", name="Save", exact=True).first.click(); page.wait_for_timeout(300)   # editing an existing outfit: the header says Save
     page.get_by_role("button", name=re.compile(r"^Done — sync to packing list")).click(); page.get_by_role("button", name="Focus Pack").wait_for()
+    kyoto = [t for t in trips(page) if t["id"] == "past1"][0]   # the builder open since O14 belongs to the Kyoto trip
+    names = {i["name"] for i in kyoto["items"] if i["category"] == "outfits"}
+    ok({"Black Lululemon flowy pants", "Light pink satin skirt", "Black Doc Martens"} <= names, f"F5 the composed names sync into the packing list as before ({sorted(names)[:6]})")
     go_home(page)
     page.screenshot(path=f"{SHOTS}/14-closet.png")
     page.evaluate("() => localStorage.clear()")

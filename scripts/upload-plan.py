@@ -112,7 +112,9 @@ def main():
         n += 1
         url = UPLOAD_BASE + (f"/{folder}" if folder else "")
         label = "**Root**" if folder == "" else f"**{folder}**"
-        bundle_dir = os.path.join(os.path.basename(os.path.normpath(args.dest)), folder) if folder else os.path.basename(os.path.normpath(args.dest))
+        # Root files sit under ROOT/ in the bundle, so UPLOAD_PLAN.md is the only file at its top level
+        # (once dragged into the repo by mistake alongside the root files).
+        bundle_dir = os.path.join(os.path.basename(os.path.normpath(args.dest)), folder if folder else "ROOT")
         lines.append(f"{n}. {label} → `{url}` — from `{bundle_dir}/`: " + ", ".join(f"`{x}`" for x in files))
         lines.append("   ```")
         lines.append(f"   <summary> - {args.batch} {n}/{total}")
@@ -137,6 +139,11 @@ def main():
     # Byte-for-byte copies of the committed files (git archive → tar), never the working tree.
     archive = subprocess.run(["git", "--no-optional-locks", "archive", "HEAD", "--", *changed], capture_output=True, check=True)
     subprocess.run(["tar", "-x", "-C", dest], input=archive.stdout, check=True)
+    root_files = [f for f in changed if os.path.dirname(f) == ""]
+    if root_files:
+        os.makedirs(os.path.join(dest, "ROOT"), exist_ok=True)
+        for f in root_files:
+            shutil.move(os.path.join(dest, f), os.path.join(dest, "ROOT", f))
     with open(os.path.join(dest, "UPLOAD_PLAN.md"), "w", encoding="utf-8") as fh:
         fh.write(plan)
     print(plan)
