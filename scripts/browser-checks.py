@@ -1,4 +1,4 @@
-"""PackPal browser regression checks (Tier 1 + Tier 2 audit fixes).
+"""PackPal browser regression checks (Tier 1 + Tier 2 audit fixes, the UX / Home Screen / rename batches, and the Outfits batch O1–O14).
 
 Drives the production build in LOCAL_MODE (no Firebase env, pure localStorage)
 with Playwright + Chromium and asserts each audit fix from a real browser:
@@ -191,9 +191,10 @@ with sync_playwright() as p:
     ok(len({i["id"] for i in copy["items"]} & {i["id"] for i in orig["items"]}) == 0, "B7 copy has all-new item ids")
     page.screenshot(path=f"{SHOTS}/06-denver-copy-B7.png")
 
-    # ── B9 + B8: outfit builder ──
+    # ── B9 + B8: outfit builder (Outfits batch flow: build on the Outfits tab, plan on the Days tab) ──
     page.get_by_role("button", name="Build Outfits").click()
-    page.get_by_text("Your outfits").wait_for()
+    page.get_by_text("Build My Outfits").wait_for()
+    page.get_by_role("button", name="Days").click()
     page.get_by_title("Tap to change emoji").first.click()
     emo = page.locator("input[style*='width: 36px']").first
     emo.fill("🇺🇸")
@@ -205,11 +206,12 @@ with sync_playwright() as p:
     emo.press("Enter")
     page.wait_for_timeout(200)
     ok(page.get_by_title("Tap to change emoji").first.text_content().strip() == "🎪", "B9 saved emoji shows on the day header")
-    page.screenshot(path=f"{SHOTS}/07-outfit-hub-emoji-B9.png")
+    page.screenshot(path=f"{SHOTS}/07-outfit-days-emoji-B9.png")
 
-    # B8: fill top + two accessory (multi) slots → 3 real slots → celebration.
+    # B8: build a NEW outfit with top + two accessory (multi) slots → 3 real slots → celebration on save.
     # With the old phantom-slot shadow only 'top' would have counted (1 < 3) → no toast.
-    page.locator("button", has_text="Tap to start building this outfit").first.click()   # Travel Day's outfit card
+    page.get_by_role("button", name="Outfits", exact=False).first.click()
+    page.get_by_role("button", name="New outfit").click()
     page.get_by_role("button", name=re.compile(r"^Add new top")).wait_for()
     def add_in_current_slot(val):
         page.get_by_role("button", name=re.compile(r"^Add (new|another) ")).click()
@@ -223,7 +225,7 @@ with sync_playwright() as p:
     page.evaluate("""() => { [...document.querySelectorAll('button')].filter(b=>b.style.height==='10px')[6].click(); }""")  # Bracelet(s)
     page.wait_for_timeout(200)
     add_in_current_slot("Gold cuff bracelet")
-    page.get_by_role("button", name="Done").first.click()
+    page.get_by_role("button", name="Save outfit").first.click()
     toast = page.get_by_text(re.compile(r"Outfit complete!|Styled & sorted!|Looking good!"))
     try:
         toast.first.wait_for(timeout=2000); seen = True; msg = toast.first.text_content()
@@ -231,7 +233,20 @@ with sync_playwright() as p:
         seen = False; msg = "(no toast)"
     ok(seen, f"B8 celebration fires for top + necklace + bracelet (3 real slots): {msg!r}")
     page.screenshot(path=f"{SHOTS}/08-outfit-celebration-B8.png")
+    # O1: the outfit is in the closet AND on this trip's shortlist; assign it to Travel Day from the Days tab
+    so = json.loads(page.evaluate("localStorage.getItem('pp2_savedOutfits') || '[]'"))
+    ok(len(so) == 1 and so[0]["name"] == "Outfit 1" and so[0]["slots"]["top"] == "Cream cashmere top" and so[0]["slots"]["necklace"] == ["Gold layered necklace"],
+       f"O1 new outfit saved to the closet (pp2_savedOutfits) with real slot ids: {json.dumps(so[0]['slots'], ensure_ascii=False)}")
+    ok(page.get_by_role("button", name="Outfit 1", exact=True).count() == 1, "O1 the outfit card shows on the trip's Outfits tab")
+    page.get_by_role("button", name="Days").click()
+    page.get_by_role("button", name="Choose outfit for Travel Day Travel Day").click()
+    page.get_by_role("dialog", name=re.compile(r"Travel Day")).wait_for()
+    page.get_by_role("button", name="Outfit 1", exact=True).click()
+    page.wait_for_timeout(300)
     plan = [t for t in trips(page) if t["destination"] == "Denver (copy)"][0]["outfitPlan"]
+    ok(plan[0][0].get("outfitId") == so[0]["id"] and plan[0][0].get("customized") is False, "O2 picking the outfit for Travel Day links the occasion (outfitId, not customized)")
+    ok(page.get_by_role("button", name="Change outfit for Travel Day Travel Day").count() == 1, "O2 the day now shows the outfit (chip reads 'Change outfit')")
+    ok([t for t in trips(page) if t["destination"] == "Denver (copy)"][0]["outfitIds"] == [so[0]["id"]], "O2 trip.outfitIds holds the shortlist")
     # ── Tier 3 (activeTrip derivation): outfit items synced into the list must persist when packed ──
     page.get_by_role("button", name=re.compile(r"^Done — sync to packing list")).click()
     page.get_by_role("button", name="Focus Pack").wait_for()
@@ -358,8 +373,8 @@ with sync_playwright() as p:
 
     # ── U5 + U6: brand/colour parsing, fix-it sheet, Tops/Bottoms sections on sync ──
     page.get_by_role("button", name="Build Outfits").click()
-    page.get_by_text("Your outfits").wait_for()
-    page.locator("button", has_text="Tap to start building this outfit").first.click()
+    page.get_by_text("Build My Outfits").wait_for()
+    page.get_by_role("button", name="New outfit").click()
     page.get_by_role("button", name=re.compile(r"^Add new top")).wait_for()
     add_in_current_slot("Cream cashmere top")            # → Bottoms
     add_in_current_slot("Blue Zevelyn jeans")            # → Layer
@@ -373,16 +388,17 @@ with sync_playwright() as p:
     page.get_by_role("heading", name="Fix details").wait_for()
     page.get_by_role("button", name="Colour Black").click()
     page.get_by_label("Brand").fill("Levi's")
-    page.get_by_role("button", name="Save").click()
+    page.get_by_role("button", name="Save", exact=True).click()   # the fix-it sheet's Save (the editor header says "Save outfit")
     page.wait_for_timeout(300)
     sw2 = page.evaluate(SWATCH_JS, "Levi's")
     meta = json.loads(page.evaluate("localStorage.getItem('pp2_wardrobeMeta') || '{}'"))
     ok(sw2 == "rgb(45, 41, 38)" and meta.get("Blue Zevelyn jeans") == {"color": "black", "brand": "Levi's"}, f"U5 fix-it: swatch black, brand Levi's, stored in wardrobeMeta ({meta})")
-    page.get_by_role("button", name="Done").first.click()
+    page.get_by_role("button", name="Save outfit").first.click()
+    page.get_by_text("Build My Outfits").wait_for()
     page.get_by_role("button", name=re.compile(r"^Done — sync to packing list")).click()
     page.get_by_role("button", name="Focus Pack").wait_for()
     secs = {(i["section"]) for i in trips(page)[0]["items"] if i["category"] == "outfits"}
-    ok(secs == {"Tops", "Bottoms"}, f"U6 synced outfit items land in 'Tops' and 'Bottoms' ({sorted(secs)})")
+    ok(secs == {"Tops", "Bottoms"}, f"U6 synced outfit items land in 'Tops' and 'Bottoms' — from the shortlist, no day assignment needed ({sorted(secs)})")
 
     # ── U7: Save to template (added item + flag) and the editor toggles ──
     # "Add section" inside Travel Necessities (the first one on the page belongs to Outfits, which the template diff ignores)
@@ -604,6 +620,148 @@ with sync_playwright() as p:
     ok(trips(page)[0]["icon"] == "🍝" and page.get_by_role("button", name="Change trip emoji").inner_text().strip() == "🍝", "R3 trip emoji changed from the header and persisted")
     go_home(page)
     ok("🍝" in page.locator("button", has_text="Bologna").first.inner_text(), "R3 Home card shows the new trip emoji")
+
+
+    # ── O3–O14: the Outfits batch — closet, shortlist, day assignment, day-only tweaks, photos, import from past trips ──
+    def saved(): return json.loads(page.evaluate("localStorage.getItem('pp2_savedOutfits') || '[]'"))
+    def trip0(): return trips(page)[0]
+    page.evaluate("() => localStorage.clear()"); page.reload(); page.get_by_role("button", name="New Trip").wait_for()
+    # A saved outfit built in the closet, then pulled into a trip
+    page.get_by_role("button", name=re.compile(r"^My Outfits")).click(); page.get_by_role("heading", name="Your closet").wait_for()
+    ok(page.get_by_text("No outfits saved yet").count() == 1, "O3 closet starts empty")
+    page.get_by_role("button", name="New outfit").click(); page.get_by_role("button", name=re.compile(r"^Add new top")).wait_for()
+    page.get_by_label("Outfit name").fill("Gallery day")
+    add_in_current_slot("White tee"); add_in_current_slot("Wide-leg trousers")   # → Layer
+    page.evaluate("""() => { [...document.querySelectorAll('button')].filter(b=>b.style.height==='10px')[3].click(); }""")  # Shoes
+    page.wait_for_timeout(200); add_in_current_slot("Loafers")
+    page.get_by_role("button", name="Save outfit").first.click(); page.get_by_role("dialog", name="Outfit Gallery day").wait_for()   # the new outfit's sheet opens (add a photo right away)
+    page.locator("button[aria-label='Close']").first.click(); page.get_by_role("heading", name="Your closet").wait_for()
+    so = saved()
+    ok(len(so) == 1 and so[0]["name"] == "Gallery day" and so[0]["slots"] == {"top": "White tee", "bottom": "Wide-leg trousers", "shoes": "Loafers"}, f"O3 closet 'New outfit' saves name + pieces ({so[0]['slots'] if so else so})")
+    ok(page.get_by_role("button", name="Gallery day", exact=True).count() == 1, "O3 the closet grid shows the card")
+    page.locator("button[aria-label='Back']").first.click(); page.get_by_role("button", name="New Trip").wait_for()
+    ok(page.get_by_text("1 saved outfit").count() == 1, "O3 Home tile counts saved outfits")
+    create_trip(page, "Porto", ["City Trip"])
+    page.get_by_role("button", name="Build Outfits").click(); page.get_by_text("Build My Outfits").wait_for()
+    ok(page.get_by_text("No outfits on this trip yet").count() == 1 and page.get_by_text("1 in your closet").count() == 1, "O4 a new trip opens on an empty Outfits tab and mentions the closet")
+    page.get_by_role("button", name="From my closet").click(); page.get_by_role("dialog", name="Add from your closet").wait_for()
+    page.get_by_role("button", name="Gallery day", exact=True).click(); page.wait_for_timeout(300)
+    ok(trip0().get("outfitIds") == [so[0]["id"]] and page.get_by_role("button", name="Gallery day", exact=True).count() == 1, "O4 'From my closet' shortlists the saved outfit on this trip")
+    # Wear it on a day from the card sheet
+    page.get_by_role("button", name="Gallery day", exact=True).click(); page.get_by_role("dialog", name="Outfit Gallery day").wait_for()
+    page.get_by_role("button", name="Wear it on a day…").click(); page.get_by_role("dialog", name=re.compile(r"^Wear")).wait_for()
+    page.get_by_role("button", name="Wear on Day 2 Day 2").click(); page.wait_for_timeout(300)
+    t = trip0(); occ = t["outfitPlan"][1][0]
+    ok(occ.get("outfitId") == so[0]["id"] and occ["slots"]["shoes"] == "Loafers", "O5 'Wear it on a day…' links Day 2 and copies the pieces")
+    page.get_by_role("button", name="Days").click()
+    ok(page.get_by_role("button", name="Change outfit for Day 2 Day 2").count() == 1 and page.get_by_text("3 pieces").count() >= 1, "O5 Days tab shows Gallery day on Day 2")
+    # Day-only tweak → customized; Update saved → propagates; Revert; Save as new
+    page.get_by_role("button", name="Tweak pieces for Day 2 Day 2").click(); page.get_by_role("button", name=re.compile(r"^Add new top")).wait_for()
+    page.evaluate("""() => { [...document.querySelectorAll('button')].filter(b=>b.style.height==='10px')[2].click(); }""")  # Layer
+    page.wait_for_timeout(200); add_in_current_slot("Trench coat")
+    ok(page.get_by_text("customized for this day", exact=False).count() >= 1 and page.get_by_role("button", name="Update “Gallery day”").count() == 1
+       and page.get_by_role("button", name="Save as new outfit").count() == 1 and page.get_by_role("button", name="Revert to saved").count() == 1,
+       "O6 tweaking a day marks it customized and offers Update / Save as new / Revert")
+    t = trip0()
+    ok(t["outfitPlan"][1][0].get("customized") is True and t["outfitPlan"][1][0]["slots"].get("layer") == "Trench coat" and "layer" not in saved()[0]["slots"], "O6 the saved outfit is untouched by the day tweak")
+    page.get_by_role("button", name="Revert to saved").click(); page.wait_for_timeout(200)
+    ok(trip0()["outfitPlan"][1][0].get("customized") is False and "layer" not in trip0()["outfitPlan"][1][0]["slots"], "O6 Revert restores the saved pieces")
+    page.evaluate("""() => { [...document.querySelectorAll('button')].filter(b=>b.style.height==='10px')[2].click(); }""")  # back to Layer (the add auto-advanced to Shoes)
+    page.wait_for_timeout(200); add_in_current_slot("Trench coat")
+    page.get_by_role("button", name="Update “Gallery day”").click(); page.wait_for_timeout(300)
+    ok(saved()[0]["slots"].get("layer") == "Trench coat" and trip0()["outfitPlan"][1][0].get("customized") is False, "O7 'Update saved outfit' writes the tweak back to the closet and un-flags the day")
+    page.evaluate("""() => { [...document.querySelectorAll('button')].filter(b=>b.style.height==='10px')[4].click(); }""")  # Bag
+    page.wait_for_timeout(200); add_in_current_slot("Straw tote")
+    page.get_by_role("button", name="Save as new outfit").click(); page.wait_for_timeout(300)
+    so = saved()
+    ok(len(so) == 2 and so[1]["name"] == "Day 2 Day 2" and so[1]["slots"].get("bag") == "Straw tote" and trip0()["outfitPlan"][1][0]["outfitId"] == so[1]["id"] and so[0]["slots"].get("bag") is None,
+       "O7 'Save as new outfit' creates a second saved outfit, links the day to it, leaves the original alone")
+    ok(sorted(trip0()["outfitIds"]) == sorted([so[0]["id"], so[1]["id"]]), "O7 the new outfit joins the trip shortlist")
+    page.locator("button[aria-label='Back']").first.click(); page.get_by_text("Build My Outfits").wait_for()
+    # Picker: search + current highlight
+    page.get_by_role("button", name="Choose outfit for Travel Day Travel Day").click(); page.get_by_role("dialog", name=re.compile(r"Travel Day")).wait_for()
+    ok(page.get_by_text("On this trip · 2").count() == 1, "O8 the day picker lists the trip's outfits first")
+    page.get_by_role("button", name="Day 2 Day 2", exact=True).click(); page.wait_for_timeout(200)
+    ok(trip0()["outfitPlan"][0][0].get("outfitId") == so[1]["id"], "O8 picking assigns the outfit to Travel Day")
+    # Remove from trip keeps the closet intact
+    page.get_by_role("button", name="Outfits", exact=False).first.click()
+    page.get_by_role("button", name="Gallery day", exact=True).click(); page.get_by_role("dialog", name="Outfit Gallery day").wait_for()
+    # (Gallery day isn't worn on any day at this point, so no confirm() appears)
+    page.get_by_role("button", name=re.compile(r"^Remove from this trip")).click(); page.wait_for_timeout(300)
+    t = trip0(); so = saved()
+    ok(t["outfitIds"] == [so[1]["id"]] and len(so) == 2 and so[0]["name"] == "Gallery day", "O9 'Remove from this trip' drops it from the shortlist only — the closet still has it")
+    page.get_by_role("button", name=re.compile(r"^Done — sync to packing list")).click(); page.get_by_role("button", name="Focus Pack").wait_for()
+    names = {i["name"] for i in trip0()["items"] if i["category"] == "outfits"}
+    ok("Straw tote" in names and "Trench coat" in names and "White tee" in names, f"O9 sync packs the shortlisted outfit's pieces ({sorted(names)})")
+    go_home(page)
+    # Photo (local mode: data URL + thumb), then remove it
+    from PIL import Image; import io
+    buf = io.BytesIO(); Image.new("RGB", (900, 1200), (193, 127, 89)).save(buf, format="PNG")
+    page.get_by_role("button", name=re.compile(r"^My Outfits")).click(); page.get_by_role("heading", name="Your closet").wait_for()
+    page.get_by_role("button", name="Gallery day", exact=True).click(); page.get_by_role("dialog", name="Outfit Gallery day").wait_for()
+    page.locator("input[type=file]").first.set_input_files({"name": "look.png", "mimeType": "image/png", "buffer": buf.getvalue()})
+    page.wait_for_timeout(1500)
+    ph = saved()[0].get("photo") or {}
+    ok(ph.get("thumb", "").startswith("data:image/jpeg") and ph.get("dataUrl", "").startswith("data:image/jpeg") and len(ph["thumb"]) < 6000 and len(ph["dataUrl"]) < 60000,
+       f"O10 local-mode photo stored as a small data URL + ~80px thumb ({len(ph.get('thumb',''))} / {len(ph.get('dataUrl',''))} chars)")
+    ok(page.locator("img[alt='Gallery day']").count() >= 1 and page.get_by_role("button", name="Replace photo").count() == 1, "O10 the sheet renders the photo and offers Replace")
+    page.get_by_role("button", name="Remove photo").click(); page.wait_for_timeout(200)
+    ok(saved()[0].get("photo") is None, "O10 Remove photo clears it")
+    # Rename from the closet
+    page.get_by_role("button", name="Rename").click(); page.get_by_label("Outfit name").fill("Gallery + lunch"); page.get_by_role("button", name="Save", exact=True).click(); page.wait_for_timeout(200)
+    ok(saved()[0]["name"] == "Gallery + lunch" and page.get_by_role("dialog", name="Outfit Gallery + lunch").count() == 1, "O11 rename from the closet sheet")
+    # Delete from the closet: the day that wore it keeps its pieces, loses the link
+    page.locator("button[aria-label='Close']").first.click()
+    page.get_by_role("button", name="Day 2 Day 2", exact=True).click(); page.get_by_role("dialog", name="Outfit Day 2 Day 2").wait_for()
+    ok(page.get_by_text("Worn on Porto").count() == 1, "O11 the closet sheet says which trip wears it")
+    page.once("dialog", lambda d: d.accept())
+    page.get_by_role("button", name="Delete from closet").click(); page.wait_for_timeout(300)
+    t = trip0()
+    ok(len(saved()) == 1 and t["outfitIds"] == [] and "outfitId" not in t["outfitPlan"][1][0] and t["outfitPlan"][1][0]["slots"].get("bag") == "Straw tote",
+       "O12 deleting from the closet unlinks the trip's days but keeps their pieces")
+    # Import from past trips: a legacy plan (no outfitId anywhere) becomes closet outfits, linked back
+    page.evaluate("""() => {
+      const ts = JSON.parse(localStorage.getItem('pp2_trips') || '[]');
+      ts.push({ id: 'past1', destination: 'Kyoto', tripType: ['international'], days: 2, weather: 'warm', startDate: '', tempRange: '', items: [], otdItems: [], otdChecked: {},
+        createdAt: '2026-04-01T00:00:00.000Z', icon: '🗼', outfitDayNames: ['Travel Day', 'Temple Day'],
+        outfitPlan: [[{ id: 'k1', type: 'daytime', label: 'Travel Day', slots: { top: 'Linen shirt', bottom: 'Black trousers', shoes: 'Sneakers' } }],
+                     [{ id: 'k2', type: 'daytime', label: 'Daytime', slots: { top: 'Linen shirt', bottom: 'Black trousers', shoes: 'Sneakers' } },
+                      { id: 'k3', type: 'evening', label: 'Evening', slots: { top: 'Silk blouse', bottom: 'Midi skirt', necklace: ['Pearls'] } },
+                      { id: 'k4', type: 'activity', label: 'Onsen', slots: { top: 'Yukata' } }]] });
+      localStorage.setItem('pp2_trips', JSON.stringify(ts));
+    }""")
+    page.goto(BASE + "/"); page.get_by_role("button", name="New Trip").wait_for()   # local mode reads the mirror on load
+    page.get_by_role("button", name=re.compile(r"^My Outfits")).click(); page.get_by_role("heading", name="Your closet").wait_for()
+    # 3 = Kyoto's two distinct outfits + Porto's now-unlinked days (identical on both days → one); Kyoto's duplicate day and its 1-piece Onsen are skipped
+    bring = page.get_by_role("button", name=re.compile(r"^Bring in \d+ from past trips")).first
+    btn_texts = page.evaluate("() => [...document.querySelectorAll('button')].map(b => b.textContent.trim()).filter(Boolean).slice(0, 12)")
+    ok(bring.count() == 1 and bring.inner_text().strip().startswith("Bring in 3"), f"O13 the closet offers to bring in the 3 distinct past outfits (duplicates and 1-piece ones skipped): {btn_texts}")
+    page.get_by_role("button", name="Bring in 3 from past trips").click(); page.wait_for_timeout(300)
+    so = saved(); names = sorted(o["name"] for o in so)
+    ok(len(so) == 4 and "Kyoto · Travel Day Travel Day" in names and "Kyoto · Temple Day Evening" in names and "Porto · Travel Day Travel Day" in names and page.get_by_text("3 outfits brought in · 2 duplicates skipped").count() == 1,
+       f"O13 imported with trip · day · occasion names ({names})")
+    kyoto = [t for t in trips(page) if t["id"] == "past1"][0]
+    ok(kyoto["outfitPlan"][0][0].get("outfitId") and kyoto["outfitPlan"][1][0].get("outfitId") == kyoto["outfitPlan"][0][0]["outfitId"] and kyoto["outfitPlan"][1][1].get("outfitId") and "outfitId" not in kyoto["outfitPlan"][1][2] and len(kyoto["outfitIds"]) == 2,
+       "O13 the past trip's occasions are linked to the imported outfits (both linen days → one outfit) and shortlisted")
+    page.get_by_role("button", name="Kyoto · Temple Day Evening", exact=True).click(); page.get_by_role("dialog", name=re.compile(r"^Outfit Kyoto")).wait_for()
+    ok(page.get_by_text("From Kyoto · Temple Day Evening").count() == 1 and page.get_by_text("Worn on Kyoto").count() == 1 and page.get_by_role("button", name="Rename").count() == 1 and page.get_by_role("button", name="Add photo").count() == 1,
+       "O13 imported outfits show their source and offer Rename + Add photo")
+    page.locator("button[aria-label='Close']").first.click()
+    page.locator("button[aria-label='Back']").first.click(); page.get_by_role("button", name="New Trip").wait_for()
+    # Legacy trip opens the builder on Days with its pieces intact
+    page.locator("button", has_text="Kyoto").first.click(); page.get_by_text("this list is read-only now").wait_for()   # April trip → locked
+    page.get_by_role("button", name="Unlock").click(); page.get_by_role("button", name="Focus Pack").wait_for()
+    page.get_by_role("button", name="Build Outfits").click(); page.get_by_text("Build My Outfits").wait_for()
+    ok(page.get_by_role("button", name="Change outfit for Temple Day Evening").count() == 1 and page.get_by_text("Kyoto · Temple Day Evening").count() >= 1 and page.get_by_text("Custom pieces for this day").count() == 1,
+       "O14 a legacy trip opens on the Days tab: linked days show their outfit, the unlinked Onsen day shows 'Custom pieces'")
+    # An empty new outfit is discarded, not saved
+    page.get_by_role("button", name="Outfits", exact=False).first.click(); page.get_by_role("button", name="New outfit").click()
+    page.get_by_role("button", name=re.compile(r"^Add new top")).wait_for(); page.get_by_role("button", name="Save outfit").first.click(); page.wait_for_timeout(200)
+    ok(len(saved()) == 4, "O14 saving an empty new outfit discards it")
+    page.get_by_role("button", name=re.compile(r"^Done — sync to packing list")).click(); page.get_by_role("button", name="Focus Pack").wait_for()
+    go_home(page)
+    page.screenshot(path=f"{SHOTS}/14-closet.png")
+    page.evaluate("() => localStorage.clear()")
 
     ok(not errors, f"No JS/page errors during the run ({len(errors)} captured)" + ("" if not errors else ": " + errors[0][:160]))
     print("Network failures (sandbox proxy, external resources only?):", *net, sep="\n  ")

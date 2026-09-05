@@ -300,6 +300,37 @@ def run(page, dialog, ctx):
     ok(wait_for(lambda: page.get_by_text("Cloudville").count() == 0 and page2.get_by_text("Cloudville").count() == 0, 4000), "remote delete: gone from both tabs")
     page2.close()
 
+    # ── 11. Outfits batch: savedOutfits round-trips through the cloud doc; photos go to Storage (the fake logs uploads) ──
+    page.goto(BASE + "/__seed__")
+    page.evaluate("() => localStorage.clear()")
+    ls_set(page, "__fakeUid", "userA")
+    set_docs(page, {"users/userA": {"onboarded": True, "phone": "+15555550100"}, "state/userA": {"state": json.dumps({"trips": [TRIP]})}})
+    page.goto(BASE + "/"); home(page)
+    page.get_by_role("button", name=re.compile(r"^My Outfits")).click(); page.get_by_role("heading", name="Your closet").wait_for()
+    page.get_by_role("button", name="New outfit").click(); page.get_by_role("button", name=re.compile(r"^Add new top")).wait_for()
+    page.get_by_label("Outfit name").fill("Cloud look")
+    page.get_by_role("button", name=re.compile(r"^Add new top")).click(); inp = page.locator("input[placeholder^='e.g. ']").first; inp.fill("Navy blazer"); inp.press("Enter"); page.wait_for_timeout(500)
+    page.get_by_role("button", name="Save outfit").first.click(); page.get_by_role("dialog", name="Outfit Cloud look").wait_for()
+    from PIL import Image; import io
+    buf = io.BytesIO(); Image.new("RGB", (800, 1000), (139, 168, 136)).save(buf, format="PNG")
+    page.locator("input[type=file]").first.set_input_files({"name": "look.png", "mimeType": "image/png", "buffer": buf.getvalue()})
+    page.wait_for_timeout(1500)
+    ok(wait_for(lambda: (cloud_state(page) or {}).get("savedOutfits") and cloud_state(page)["savedOutfits"][0]["name"] == "Cloud look", 4000), "outfits: savedOutfits reaches the cloud doc")
+    so = cloud_state(page)["savedOutfits"][0]
+    ups = json.loads(ls_get(page, "__fakeUploads") or "[]")
+    ok(len(ups) == 1 and ups[0]["path"] == f"outfits/userA/{so['id']}.jpg" and ups[0]["type"] == "image/jpeg" and 0 < ups[0]["bytes"] < 300000,
+       f"outfits: the photo is uploaded once to outfits/{{uid}}/{{outfitId}}.jpg as a resized JPEG ({ups[0]['bytes'] if ups else 'no'} bytes)")
+    ok(so.get("photo", {}).get("path") == f"outfits/userA/{so['id']}.jpg" and str(so["photo"].get("url", "")).startswith("blob:") and so["photo"].get("thumb", "").startswith("data:image/jpeg") and len(so["photo"]["thumb"]) < 6000 and "dataUrl" not in so["photo"],
+       "outfits: the cloud record keeps { url, path, thumb } — no full image in the 1 MiB doc")
+    ok(page.locator("img[alt='Cloud look']").count() >= 1, "outfits: the sheet renders the Storage URL")
+    page.get_by_role("button", name="Remove photo").click(); page.wait_for_timeout(300)
+    dels = json.loads(ls_get(page, "__fakeDeletes") or "[]")
+    ok(len(dels) == 1 and dels[0]["path"] == f"outfits/userA/{so['id']}.jpg" and wait_for(lambda: cloud_state(page)["savedOutfits"][0].get("photo") is None, 4000), "outfits: Remove photo deletes the Storage object and clears the record")
+    page.locator("button[aria-label='Close']").first.click()
+    page.reload(); home(page)
+    page.get_by_role("button", name=re.compile(r"^My Outfits")).click(); page.get_by_role("heading", name="Your closet").wait_for()
+    ok(page.get_by_role("button", name="Cloud look", exact=True).count() == 1, "outfits: the closet comes back from the cloud after a reload")
+
 
 with sync_playwright() as p:
     browser = p.chromium.launch()
