@@ -812,7 +812,7 @@ export default function PackPal() {
           {wStep === 1 && (<div>
             <h2 style={{ fontFamily: F.display, fontSize: 32, color: C.charcoal, fontWeight: 400, marginBottom: 8 }}>What kind of trip?</h2>
             <p style={{ fontFamily: F.body, fontSize: 14, color: C.warmGray, marginBottom: 28 }}>Select all that apply.</p>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 12 }}>
               {TRIP_TYPES.map(t => {
                 const sel = nTrip.tripType.includes(t.id);
                 return (<button key={t.id} onClick={() => setNTrip({ ...nTrip, tripType: sel ? nTrip.tripType.filter(x => x !== t.id) : [...nTrip.tripType, t.id] })}
@@ -899,7 +899,7 @@ export default function PackPal() {
               letterSpacing: ".06em", color: C.warmGray, marginBottom: 12 }}>
               {weatherData ? "Or override:" : "Or pick manually:"}
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 8 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 8 }}>
               {TEMP_RANGES.map(t => (
                 <button key={t.id} onClick={() => setNTrip({ ...nTrip, tempRange: t.id })}
                   style={{ padding: "14px 16px", borderRadius: 14, textAlign: "left",
@@ -1556,7 +1556,7 @@ export default function PackPal() {
       <div style={{ padding: "0 20px 32px" }}>
         <div style={{ fontFamily: F.body, fontSize: 12, fontWeight: 600, textTransform: "uppercase",
           letterSpacing: ".08em", color: C.warmGray, padding: "8px 8px 12px" }}>Explore</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 12 }}>
           {[
             { label: "Trip History", sub: "22 past trips", icon: <Clock size={20} />, act: () => setView("history"), col: C.copper },
             { label: "Insights", sub: "Patterns & tips", icon: <BarChart3 size={20} />, act: () => setView("insights"), col: C.sage },
