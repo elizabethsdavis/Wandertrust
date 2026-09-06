@@ -13,7 +13,10 @@
 //   __fakeFailWrites "1" → setDoc / transaction commit throws
 //   __fakeFailReads  "1" → getDoc throws
 //   __fakePausePush  "1" → listeners are not notified (simulates a stalled connection)
+//   __fakeLatencyMs  N   → every read / commit takes N ms (Sync Fix batch: lets two tabs' transactions overlap)
 //   __fakeWrites     JSON log of every successful write {path, bytes, at}
+// Docs carry a hidden `__v` version (Sync Fix batch): a transaction whose commit
+// finds the doc changed since its read is re-run from a fresh read, like Firestore.
 
 const ls = (k, fb = null) => {
   try { const v = localStorage.getItem(k); return v == null ? fb : v; } catch { return fb; }
@@ -31,10 +34,12 @@ const state = {
 };
 window.__fake = state;
 
+const visible = (d) => { if (!d) return d; const { __v, ...rest } = d; void __v; return rest; };
 const snapshotOf = (path) => {
   const d = loadDocs()[path];
-  return { exists: () => d !== undefined, data: () => d, metadata: { hasPendingWrites: false } };
+  return { exists: () => d !== undefined, data: () => visible(d), metadata: { hasPendingWrites: false }, __v: d?.__v || 0 };
 };
+const latency = () => { const ms = parseInt(ls("__fakeLatencyMs", "0"), 10) || 0; return ms > 0 ? new Promise((r) => setTimeout(r, ms)) : null; };
 const logWrite = (path, data) => {
   const log = (() => { try { return JSON.parse(ls("__fakeWrites", "[]")); } catch { return []; } })();
   log.push({ path, bytes: JSON.stringify(data).length, at: Date.now() });
@@ -80,6 +85,7 @@ export async function signInWithCustomToken() { return {}; }
 export function getFirestore() { return { fake: true }; }
 export function doc(_db, col, id) { return { path: `${col}/${id}` }; }
 export async function getDoc(ref) {
+  await latency();
   if (ls("__fakeFailReads") === "1") throw new Error("fake: network unavailable");
   return snapshotOf(ref.path);
 }
@@ -87,21 +93,39 @@ function commit(ref, data, opts) {
   if (ls("__fakeFailWrites") === "1") throw new Error("fake: write rejected");
   const docs = loadDocs();
   const prev = docs[ref.path] || {};
-  docs[ref.path] = opts?.merge ? { ...prev, ...data } : { ...data };
+  docs[ref.path] = { ...(opts?.merge ? { ...prev, ...data } : { ...data }), __v: (prev.__v || 0) + 1 };
   saveDocs(docs);
   logWrite(ref.path, data);
   notify(ref.path);
 }
-export async function setDoc(ref, data, opts) { commit(ref, data, opts); }
+export async function setDoc(ref, data, opts) { await latency(); commit(ref, data, opts); }
 export async function runTransaction(_db, fn) {
-  const writes = [];
-  const tx = {
-    get: async (ref) => { if (ls("__fakeFailReads") === "1") throw new Error("fake: network unavailable"); return snapshotOf(ref.path); },
-    set: (ref, data, opts) => { writes.push([ref, data, opts]); },
-  };
-  const result = await fn(tx);
-  for (const [ref, data, opts] of writes) commit(ref, data, opts);
-  return result;
+  for (let attempt = 1; ; attempt++) {
+    const writes = [];
+    const reads = new Map(); // path → version read
+    const tx = {
+      get: async (ref) => {
+        await latency();
+        if (ls("__fakeFailReads") === "1") throw new Error("fake: network unavailable");
+        const snap = snapshotOf(ref.path);
+        reads.set(ref.path, snap.__v);
+        return snap;
+      },
+      set: (ref, data, opts) => { writes.push([ref, data, opts]); },
+    };
+    const result = await fn(tx);
+    if (writes.length === 0) return result;
+    await latency();
+    // Firestore's rule: the commit fails if anything read changed since the read; the SDK re-runs fn (5 attempts).
+    const docs = loadDocs();
+    const moved = [...reads].some(([path, v]) => (docs[path]?.__v || 0) !== v);
+    if (moved) {
+      if (attempt >= 5) throw new Error("fake: transaction aborted — too much contention");
+      continue;
+    }
+    for (const [ref, data, opts] of writes) commit(ref, data, opts);
+    return result;
+  }
 }
 export function onSnapshot(ref, cb, _err) {
   if (!state.docListeners.has(ref.path)) state.docListeners.set(ref.path, new Set());
