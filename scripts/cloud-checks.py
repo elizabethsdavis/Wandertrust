@@ -318,14 +318,23 @@ def run(page, dialog, ctx):
     ok(wait_for(lambda: (cloud_state(page) or {}).get("savedOutfits") and cloud_state(page)["savedOutfits"][0]["name"] == "Cloud look", 4000), "outfits: savedOutfits reaches the cloud doc")
     so = cloud_state(page)["savedOutfits"][0]
     ups = json.loads(ls_get(page, "__fakeUploads") or "[]")
-    ok(len(ups) == 1 and ups[0]["path"] == f"outfits/userA/{so['id']}.jpg" and ups[0]["type"] == "image/jpeg" and 0 < ups[0]["bytes"] < 300000,
-       f"outfits: the photo is uploaded once to outfits/{{uid}}/{{outfitId}}.jpg as a resized JPEG ({ups[0]['bytes'] if ups else 'no'} bytes)")
-    ok(so.get("photo", {}).get("path") == f"outfits/userA/{so['id']}.jpg" and str(so["photo"].get("url", "")).startswith("blob:") and so["photo"].get("thumb", "").startswith("data:image/jpeg") and len(so["photo"]["thumb"]) < 6000 and "dataUrl" not in so["photo"],
-       "outfits: the cloud record keeps { url, path, thumb } — no full image in the 1 MiB doc")
-    ok(page.locator("img[alt='Cloud look']").count() >= 1, "outfits: the sheet renders the Storage URL")
+    paths = [u["path"] for u in ups]
+    ok(len(ups) == 2 and paths == [f"outfits/userA/{so['id']}.jpg", f"outfits/userA/{so['id']}_card.jpg"] and all(u["type"] == "image/jpeg" for u in ups)
+       and 0 < ups[1]["bytes"] < ups[0]["bytes"] < 300000,
+       f"outfits: the photo is uploaded as the full JPEG plus a smaller card rendition (_card.jpg) ({[u['bytes'] for u in ups]} bytes)")
+    ph = so.get("photo", {})
+    ok(ph.get("path") == f"outfits/userA/{so['id']}.jpg" and ph.get("cardPath") == f"outfits/userA/{so['id']}_card.jpg" and str(ph.get("url", "")).startswith("blob:") and str(ph.get("cardUrl", "")).startswith("blob:")
+       and ph.get("thumb", "").startswith("data:image/jpeg") and len(ph["thumb"]) < 6000 and "dataUrl" not in ph,
+       "outfits: the cloud record keeps { url, path, cardUrl, cardPath, thumb } — no full image in the 1 MiB doc")
+    ok(page.locator("img[alt='Cloud look']").count() >= 1 and page.locator("img[alt='Cloud look']").first.get_attribute("src") == ph.get("url"), "outfits: the sheet renders the full Storage URL")   # .first = the sheet (rendered before the grid)
+    page.locator("button[aria-label='Close']").first.click(); page.wait_for_timeout(300)
+    card_src = page.locator("img[alt='Cloud look']").last.get_attribute("src")
+    ok(card_src == ph.get("cardUrl"), f"outfits: the closet card draws the card rendition, not the 80 px thumb ({'card' if card_src == ph.get('cardUrl') else card_src[:40]})")
+    page.get_by_role("button", name="Cloud look", exact=True).click(); page.get_by_role("dialog", name="Outfit Cloud look").wait_for()
     page.get_by_role("button", name="Remove photo").click(); page.wait_for_timeout(300)
     dels = json.loads(ls_get(page, "__fakeDeletes") or "[]")
-    ok(len(dels) == 1 and dels[0]["path"] == f"outfits/userA/{so['id']}.jpg" and wait_for(lambda: cloud_state(page)["savedOutfits"][0].get("photo") is None, 4000), "outfits: Remove photo deletes the Storage object and clears the record")
+    ok(sorted(d["path"] for d in dels) == sorted([f"outfits/userA/{so['id']}.jpg", f"outfits/userA/{so['id']}_card.jpg"]) and wait_for(lambda: cloud_state(page)["savedOutfits"][0].get("photo") is None, 4000),
+       "outfits: Remove photo deletes both Storage objects and clears the record")
     page.locator("button[aria-label='Close']").first.click()
     page.reload(); home(page)
     page.get_by_role("button", name=re.compile(r"^My Outfits")).click(); page.get_by_role("heading", name="Your closet").wait_for()

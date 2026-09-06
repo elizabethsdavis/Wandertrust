@@ -1,4 +1,4 @@
-"""PackPal browser regression checks (Tier 1 + Tier 2 audit fixes, the UX / Home Screen / rename batches, the Outfits batch O1–O14 and the Fields batch F1–F5).
+"""PackPal browser regression checks (Tier 1 + Tier 2 audit fixes, the UX / Home Screen / rename batches, the Outfits batch O1–O14, the Fields batch F1–F5 and the Piece Edit batch PE1–PE6).
 
 Drives the production build in LOCAL_MODE (no Firebase env, pure localStorage)
 with Playwright + Chromium and asserts each audit fix from a real browser:
@@ -385,18 +385,27 @@ with sync_playwright() as p:
     page.evaluate("""() => { [...document.querySelectorAll('button')].filter(b=>b.style.height==='10px')[1].click(); }""")  # back to Bottoms
     page.wait_for_timeout(300)
     ok(page.get_by_text("Zevelyn", exact=True).count() == 1, "U5 wardrobe card shows the capitalized brand 'Zevelyn'")
-    SWATCH_JS = """(brand) => { const row=[...document.querySelectorAll("[title='Tap to fix the colour or brand']")].find(r=>r.textContent===brand); return row ? getComputedStyle(row.firstElementChild).backgroundColor : null; }"""
+    SWATCH_JS = """(brand) => { const row=[...document.querySelectorAll("[title='Edit this piece']")].find(r=>r.textContent===brand); return row ? getComputedStyle(row.firstElementChild).backgroundColor : null; }"""
     sw = page.evaluate(SWATCH_JS, "Zevelyn")
     ok(sw == "rgb(123, 163, 201)", f"U5 swatch is the blue family ({sw})")
-    page.get_by_title("Tap to fix the colour or brand").first.click()
-    page.get_by_role("heading", name="Fix details").wait_for()
+    # Piece Edit batch: the row opens the "Edit piece" sheet — a legacy free-text name comes back as colour / brand / type
+    page.get_by_label("Edit Blue Zevelyn jeans").click()
+    page.get_by_role("dialog", name="Edit Blue Zevelyn jeans").wait_for()
+    ok(page.get_by_label("Edit colour").input_value() == "Blue" and page.get_by_label("Edit brand").input_value() == "Zevelyn" and page.get_by_label("Edit type").input_value() == "jeans"
+       and page.get_by_text("Name unchanged.").count() == 1, "PE1 the edit sheet carves a legacy name into colour / brand / type and reports the name unchanged")
     page.get_by_role("button", name="Colour Black").click()
-    page.get_by_label("Brand").fill("Levi's")
-    page.get_by_role("button", name="Save", exact=True).click()   # the fix-it sheet's Save (the editor header says "Save outfit")
+    page.get_by_label("Edit brand").fill("Levi's")
+    ok(page.get_by_label("Edited piece preview").text_content() == "Levi'sBlue Levi's jeans" and page.get_by_text("Renaming — nothing else uses this piece yet.").count() == 1
+       and page.get_by_role("button", name="Save & rename").count() == 1, "PE1 editing the brand previews the new name and switches the button to 'Save & rename'")
+    page.get_by_role("button", name="Save & rename").click()
     page.wait_for_timeout(300)
     sw2 = page.evaluate(SWATCH_JS, "Levi's")
     meta = json.loads(page.evaluate("localStorage.getItem('pp2_wardrobeMeta') || '{}'"))
-    ok(sw2 == "rgb(45, 41, 38)" and meta.get("Blue Zevelyn jeans") == {"color": "black", "brand": "Levi's"}, f"U5 fix-it: swatch black, brand Levi's, stored in wardrobeMeta ({meta})")
+    wb = json.loads(page.evaluate("localStorage.getItem('pp2_wardrobe') || '{}'"))
+    levis = meta.get("Blue Levi's jeans")
+    ok(sw2 == "rgb(45, 41, 38)" and levis == {"colorName": "Blue", "brand": "Levi's", "type": "jeans", "color": "black"} and "Blue Zevelyn jeans" not in meta
+       and wb.get("bottom") == ["Blue Levi's jeans"] and page.get_by_text("Blue Levi's jeans", exact=True).count() >= 1,
+       f"U5/PE1 saved: the piece is now 'Blue Levi's jeans' (wardrobe + details moved, black swatch override kept), the outfit draft shows the new name ({levis})")
     page.get_by_role("button", name="Save outfit").first.click()
     page.get_by_text("Build My Outfits").wait_for()
     page.get_by_role("button", name=re.compile(r"^Done — sync to packing list")).click()
@@ -810,26 +819,72 @@ with sync_playwright() as p:
     so = saved(); ft = [o for o in so if o["name"] == "Fields test"]
     ok(len(ft) == 1 and ft[0]["slots"].get("top") == "Black Lululemon flowy pants" and ft[0]["slots"].get("bottom") == "Light pink satin skirt" and ft[0]["slots"].get("bottom") != "Blue",
        f"F4 the saved outfit holds the composed names ({ft[0]['slots'] if ft else so})")
-    # F5: the fix-it sheet keeps the structured fields (Auto too); a type-only entry stores nothing (free text as before)
+    # F5: the edit sheet's swatch override keeps the typed fields; a type-only entry stores nothing (free text as before)
     page.get_by_role("button", name="Fields test", exact=True).first.click(); page.get_by_role("dialog", name="Outfit Fields test").wait_for()
     page.get_by_role("button", name="Edit pieces").click(); page.get_by_role("button", name=re.compile(r"^Add new top")).wait_for()
-    row = page.locator("[title='Tap to fix the colour or brand']").filter(has_text="Lululemon").first; row.click()
-    page.get_by_role("heading", name="Fix details").wait_for()
+    page.get_by_label("Edit Black Lululemon flowy pants").click(); page.get_by_role("dialog", name="Edit Black Lululemon flowy pants").wait_for()
+    ok(page.get_by_label("Edit colour").input_value() == "Black" and page.get_by_label("Edit brand").input_value() == "Lululemon" and page.get_by_label("Edit type").input_value() == "flowy pants",
+       "PE2 a piece entered through the fields comes back exactly as typed")
     page.get_by_role("button", name="Colour Blue").click(); page.get_by_role("button", name="Save", exact=True).last.click(); page.wait_for_timeout(300)   # .last = the sheet's Save (the editor header also says Save here)
-    ok(wmeta().get("Black Lululemon flowy pants") == {"colorName": "Black", "type": "flowy pants", "color": "blue"} and page.evaluate(SWATCH_JS, "Lululemon") == "rgb(123, 163, 201)",
-       f"F5 fixing the colour keeps colorName/type next to the override ({wmeta().get('Black Lululemon flowy pants')})")
-    row.click(); page.get_by_role("heading", name="Fix details").wait_for()
-    page.get_by_role("button", name="Auto").click(); page.wait_for_timeout(300)
-    ok(wmeta().get("Black Lululemon flowy pants") == {"colorName": "Black", "type": "flowy pants"} and page.evaluate(SWATCH_JS, "Lululemon") == "rgb(45, 41, 38)",
-       f"F5 'Auto' drops the override but keeps what was typed ({wmeta().get('Black Lululemon flowy pants')})")
+    ok(wmeta().get("Black Lululemon flowy pants") == {"colorName": "Black", "brand": "Lululemon", "type": "flowy pants", "color": "blue"} and page.evaluate(SWATCH_JS, "Lululemon") == "rgb(123, 163, 201)",
+       f"F5 a swatch override is stored next to the typed fields, the name stays ({wmeta().get('Black Lululemon flowy pants')})")
+    page.get_by_label("Edit Black Lululemon flowy pants").click(); page.get_by_role("dialog", name="Edit Black Lululemon flowy pants").wait_for()
+    page.get_by_role("button", name="Colour Black").click(); page.get_by_role("button", name="Save", exact=True).last.click(); page.wait_for_timeout(300)
+    ok(wmeta().get("Black Lululemon flowy pants") == {"colorName": "Black", "brand": "Lululemon", "type": "flowy pants"} and page.evaluate(SWATCH_JS, "Lululemon") == "rgb(45, 41, 38)",
+       f"F5 picking the auto-detected family again drops the override, the typed fields stay ({wmeta().get('Black Lululemon flowy pants')})")
+    # PE6 (parser): descriptor words that start a name ("Hair clips", "Wide-leg trousers") no longer read as brands
+    page.evaluate("""() => { [...document.querySelectorAll('button')].filter(b=>b.style.height==='10px')[8].click(); }""")  # Hair Accessory
+    page.wait_for_timeout(200); add_in_current_slot("Hair clips")   # multi slot: stays on Hair
+    ok(page.get_by_text("Hair clips", exact=True).count() >= 1 and page.get_by_text("Hair", exact=True).count() == 0, "PE6 'Hair clips' shows no bogus HAIR brand chip")
     page.evaluate("""() => { [...document.querySelectorAll('button')].filter(b=>b.style.height==='10px')[3].click(); }""")  # Shoes
     page.wait_for_timeout(200); add_in_current_slot("Black Doc Martens")
     ok("Black Doc Martens" in wardrobe().get("shoes", []) and "Black Doc Martens" not in wmeta(), "F5 a type-only entry is plain free text: named as typed, nothing stored in wardrobeMeta")
+    # PE3: rename a legacy piece → wardrobe, details, the saved outfit and the open draft all follow
+    page.evaluate("""() => { [...document.querySelectorAll('button')].filter(b=>b.style.height==='10px')[3].click(); }""")  # back to Shoes (the add auto-advanced)
+    page.wait_for_timeout(200)
+    page.get_by_label("Edit Black Doc Martens").click(); page.get_by_role("dialog", name="Edit Black Doc Martens").wait_for()
+    ok(page.get_by_label("Edit colour").input_value() == "Black" and page.get_by_label("Edit brand").input_value() == "Doc Martens" and page.get_by_label("Edit type").input_value() == "",
+       "PE3 a brand-only legacy name splits into colour + brand with an empty type")
+    page.get_by_label("Edit type").fill("boots")
+    ok(page.get_by_text("Renaming — nothing else uses this piece yet.").count() == 1, "PE3 the sheet's note: the piece is only in this unsaved draft so far")
+    page.get_by_role("button", name="Save & rename").click(); page.wait_for_timeout(300)
+    ok(wardrobe().get("shoes", []).count("Black Doc Martens boots") == 1 and "Black Doc Martens" not in wardrobe().get("shoes", [])
+       and wmeta().get("Black Doc Martens boots") == {"colorName": "Black", "brand": "Doc Martens", "type": "boots"} and page.get_by_text("Black Doc Martens boots", exact=True).count() >= 1,
+       f"PE3 renamed in the wardrobe + details, and this editor's pick follows ({wardrobe().get('shoes')})")
+    # PE4: renaming onto a piece the slot already has merges into it
+    page.evaluate("""() => { [...document.querySelectorAll('button')].filter(b=>b.style.height==='10px')[1].click(); }""")  # Bottoms
+    page.wait_for_timeout(200)
+    page.get_by_label("Edit Light pink satin skirt").click(); page.get_by_role("dialog", name="Edit Light pink satin skirt").wait_for()
+    page.get_by_label("Edit colour").fill(""); page.get_by_label("Edit type").fill("wide-leg trousers")
+    page.get_by_role("button", name="Save & rename").click(); page.wait_for_timeout(300)
+    bottoms = wardrobe().get("bottom", [])
+    ok(bottoms.count("Wide-leg trousers") == 1 and "Light pink satin skirt" not in bottoms and not [b for b in bottoms if b.lower() == "wide-leg trousers" and b != "Wide-leg trousers"]
+       and "Light pink satin skirt" not in wmeta() and [o for o in saved() if o["name"] == "Fields test"][0]["slots"].get("bottom") == "Wide-leg trousers",
+       f"PE4 renaming onto an existing piece merges into it — one entry, existing spelling, the outfit follows ({bottoms})")
     page.get_by_role("button", name="Save", exact=True).first.click(); page.wait_for_timeout(300)   # editing an existing outfit: the header says Save
+    so_ft = [o for o in saved() if o["name"] == "Fields test"][0]
+    ok(so_ft["slots"].get("shoes") == "Black Doc Martens boots" and so_ft["slots"].get("bottom") == "Wide-leg trousers", f"PE3/PE4 the saved outfit holds the renamed pieces after Save ({so_ft['slots']})")
+    # PE5: a piece worn on a trip day is renamed from the day's editor — the plan is patched in place (no stale name, not flagged customized)
+    page.get_by_role("button", name="Fields test", exact=True).first.click(); page.get_by_role("dialog", name="Outfit Fields test").wait_for()
+    page.get_by_role("button", name="Wear it on a day…").click(); page.get_by_role("dialog", name=re.compile(r"^Wear")).wait_for()
+    page.get_by_role("button", name="Wear on Travel Day Travel Day").click(); page.wait_for_timeout(300)
+    page.get_by_role("button", name="Days").click()
+    page.get_by_role("button", name="Tweak pieces for Travel Day Travel Day").click(); page.get_by_role("button", name=re.compile(r"^Add new top")).wait_for()
+    page.get_by_label("Edit Black Lululemon flowy pants").click(); page.get_by_role("dialog", name="Edit Black Lululemon flowy pants").wait_for()
+    page.get_by_label("Edit type").fill("wide-leg pants")
+    ok(page.get_by_text("Renaming updates 1 saved outfit, 1 trip day.").count() == 1, "PE5 the note counts the saved outfit and the day wearing the piece")
+    page.get_by_role("button", name="Save & rename").click(); page.wait_for_timeout(300)
+    ok(page.get_by_text("Black Lululemon wide-leg pants", exact=True).count() >= 1 and page.get_by_text("customized for this day", exact=False).count() == 0,
+       "PE5 the day's editor shows the new name and the day is NOT marked customized")
+    page.locator("button[aria-label='Back']").first.click(); page.get_by_text("Build My Outfits").wait_for()
     page.get_by_role("button", name=re.compile(r"^Done — sync to packing list")).click(); page.get_by_role("button", name="Focus Pack").wait_for()
     kyoto = [t for t in trips(page) if t["id"] == "past1"][0]   # the builder open since O14 belongs to the Kyoto trip
     names = {i["name"] for i in kyoto["items"] if i["category"] == "outfits"}
-    ok({"Black Lululemon flowy pants", "Light pink satin skirt", "Black Doc Martens"} <= names, f"F5 the composed names sync into the packing list as before ({sorted(names)[:6]})")
+    day0 = kyoto["outfitPlan"][0][0]
+    ok({"Black Lululemon wide-leg pants", "Wide-leg trousers", "Black Doc Martens boots"} <= names and not ({"Black Lululemon flowy pants", "Light pink satin skirt", "Black Doc Martens"} & names),
+       f"F5/PE5 the renamed pieces sync into the packing list under their new names, none of the old ones ({sorted(names)[:8]})")
+    ok(day0["slots"].get("top") == "Black Lululemon wide-leg pants" and day0.get("customized") is False and [o for o in saved() if o["name"] == "Fields test"][0]["slots"].get("top") == "Black Lululemon wide-leg pants",
+       "PE5 the saved plan carries the new name on Travel Day, still linked and un-customized, and the closet outfit matches")
     go_home(page)
     page.screenshot(path=f"{SHOTS}/14-closet.png")
     page.evaluate("() => localStorage.clear()")
