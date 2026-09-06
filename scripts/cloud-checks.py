@@ -48,8 +48,20 @@ TRIP = {"id": "cloud1", "destination": "Cloudville", "tripType": ["city"], "days
 def ls_get(page, k): return page.evaluate("k => localStorage.getItem(k)", k)
 def ls_set(page, k, v): page.evaluate("([k, v]) => localStorage.setItem(k, v)", [k, v])
 def ls_del(page, k): page.evaluate("k => localStorage.removeItem(k)", k)
-def docs(page): return json.loads(ls_get(page, "__fakeDocs") or "{}")
-def set_docs(page, d): ls_set(page, "__fakeDocs", json.dumps(d))
+def docs(page):
+    """The fake's docs without the hidden __v versions (see fake-firebase.js)."""
+    return {k: {kk: vv for kk, vv in v.items() if kk != "__v"} for k, v in json.loads(ls_get(page, "__fakeDocs") or "{}").items()}
+
+
+def set_docs(page, d):
+    """Write docs the way another device would: a changed doc gets a new version, so an open transaction that read it is re-run."""
+    cur = json.loads(ls_get(page, "__fakeDocs") or "{}")
+    out = {}
+    for k, v in d.items():
+        prev = cur.get(k, {})
+        prev_vis = {kk: vv for kk, vv in prev.items() if kk != "__v"}
+        out[k] = {**v, "__v": (prev.get("__v", 0) + (1 if prev_vis != v else 0))}
+    ls_set(page, "__fakeDocs", json.dumps(out))
 
 
 def cloud_state(page):
@@ -153,10 +165,10 @@ def run(page, dialog, ctx):
        "failure: cloud untouched, local mirror has the change")
     open_account(page)
     ok(page.get_by_text("Not synced — changes are only on this device").count() == 1, "failure: Account sheet says 'Not synced'")
-    ok(page.get_by_role("button", name="Retry").count() == 1, "failure: Retry button offered")
+    ok(page.get_by_role("button", name="Retry", exact=True).count() == 1, "failure: Retry button offered")
     page.screenshot(path="shots/cloud-01-not-synced.png")
     ls_del(page, "__fakeFailWrites")
-    page.get_by_role("button", name="Retry").click()
+    page.get_by_role("button", name="Retry", exact=True).click()
     ok(wait_for(lambda: cloud_item(page, "i2")["packed"] is True) and wait_for(lambda: page.get_by_text("Synced to cloud").count() == 1),
        "retry: pushes the pending state, label back to 'Synced to cloud'")
     close_account(page)
@@ -197,10 +209,11 @@ def run(page, dialog, ctx):
     d = docs(page); del d["state/userA"]; set_docs(page, d)
     page.reload(); home(page)
     ok(page.get_by_text("Cloudville").count() == 1, "missing-doc: trips restored from this device's mirror instead of an empty account")
-    ok(wait_dot(page, "amber", 3000), "missing-doc: flagged as not-synced until re-uploaded")
+    ok(wait_for(lambda: cloud_trip(page) is not None, 4000) and wait_dot(page, "sage", 4000),
+       "missing-doc: the mirror is re-uploaded right away (Sync Fix) — cloud doc back, dot sage")
     open_trip(page); tap_item(page, "Beta item")
     ok(wait_for(lambda: cloud_trip(page) is not None and cloud_item(page, "i2")["packed"] is False) and wait_dot(page, "sage", 4000),
-       "missing-doc: next edit re-creates the cloud doc from the mirror")
+       "missing-doc: the next edit lands in the re-created cloud doc")
 
     # ── 7. B10: sign-out flushes the pending save, then clears the mirror ──
     open_trip(page); tap_item(page, "Alpha item")   # pack — still inside the 800 ms debounce when we sign out
@@ -339,6 +352,65 @@ def run(page, dialog, ctx):
     page.reload(); home(page)
     page.get_by_role("button", name=re.compile(r"^My Outfits")).click(); page.get_by_role("heading", name="Your closet").wait_for()
     ok(page.get_by_role("button", name="Cloud look", exact=True).count() == 1, "outfits: the closet comes back from the cloud after a reload")
+
+    # ── 12. Sync Fix batch: the engine never loses an edit it was given ──
+    page.goto(BASE + "/__seed__")
+    page.evaluate("() => localStorage.clear()")
+    ls_set(page, "__fakeUid", "userA")
+    set_docs(page, {"users/userA": {"onboarded": True, "phone": "+15555550100"}, "state/userA": {"state": json.dumps({"trips": [TRIP]})}})
+    page.goto(BASE + "/"); home(page)
+    # 12a. re-opening the outfit builder changes nothing → no write at all (the old store rewrote the doc on every mount)
+    open_trip(page); page.get_by_role("button", name="Build Outfits").click()      # first open seeds the trip's day plan (a real change)
+    page.get_by_role("button", name="New outfit").wait_for(); page.wait_for_timeout(1500)
+    page.get_by_role("button", name="Back").first.click(); page.get_by_role("button", name="Focus Pack").wait_for(); page.wait_for_timeout(1500)
+    writes_before = len(json.loads(ls_get(page, "__fakeWrites") or "[]"))
+    page.get_by_role("button", name="Build Outfits").click(); page.get_by_role("button", name="New outfit").wait_for(); page.wait_for_timeout(1500)
+    page.get_by_role("button", name="Back").first.click(); page.get_by_role("button", name="Focus Pack").wait_for(); page.wait_for_timeout(1200)
+    ok(len(json.loads(ls_get(page, "__fakeWrites") or "[]")) == writes_before, "sync: re-opening the outfit builder does not rewrite an unchanged cloud doc")
+    go_home(page)
+
+    # 12b. an edit made right before a reload (inside the 800 ms debounce) survives: the tab's pending copy is merged on load
+    open_trip(page); page.get_by_text("Alpha item", exact=True).click(); page.wait_for_timeout(100)
+    page.reload(); home(page)
+    ok(wait_for(lambda: cloud_item(page, "i1")["packed"] is True, 5000) and wait_dot(page, "sage", 4000),
+       "sync: an edit cut off by a reload is restored from this tab's pending copy and reaches the cloud")
+    ok(page.evaluate("() => Object.keys(localStorage).filter(k => k.startsWith('pp2_pending')).length") == 0, "sync: the pending copy is dropped once it has landed")
+
+    # 12c. two tabs, slow network: a transaction that loses the race is re-run and MERGED — the newer write is never erased
+    ls_set(page, "__fakeLatencyMs", "500")
+    page2 = ctx.new_page(); page2.set_default_timeout(8000)
+    page2.goto(BASE + "/"); home(page2)
+    open_trip(page, "Cloudville"); open_trip(page2, "Cloudville")
+    page.get_by_text("Beta item", exact=True).click()                       # tab 1: pack Beta (its slow write starts in 800 ms)
+    page.wait_for_timeout(900)
+    page2.get_by_text("Gamma item", exact=True).click()                     # tab 2: pack Gamma while tab 1's transaction is mid-flight
+    ok(wait_for(lambda: cloud_trip(page)["items"][1]["packed"] and cloud_trip(page)["items"][2]["packed"], 8000),
+       "sync: overlapping transactions from two tabs both land (Beta AND Gamma packed) — the slower one merges instead of overwriting")
+    ok(wait_for(lambda: page.get_by_text("3 of 4 packed").count() == 1 and page2.get_by_text("3 of 4 packed").count() == 1, 8000),
+       "sync: both tabs converge on the same state (3 of 4 packed)")
+    page2.close(); ls_del(page, "__fakeLatencyMs"); go_home(page)
+
+    # 12d. a save that keeps failing is announced on any screen, and the engine retries by itself
+    ls_set(page, "__fakeFailWrites", "1")
+    open_trip(page); page.get_by_text("Delta item", exact=True).click(); page.wait_for_timeout(100)
+    ok(page.get_by_text("Changes aren't saved to the cloud yet").count() == 0, "banner: not shown for a save that has only just failed (no flicker)")
+    ok(wait_for(lambda: page.get_by_text("Changes aren't saved to the cloud yet").count() == 1, 8000), "banner: shown once the save has been failing for a few seconds")
+    page.screenshot(path="shots/cloud-03-sync-banner.png")
+    ls_del(page, "__fakeFailWrites")
+    ok(wait_for(lambda: cloud_item(page, "i4")["packed"] is True, 8000), "banner: the engine's own retry (backoff) lands the edit once writes work again")
+    ok(wait_for(lambda: page.get_by_text("Changes aren't saved to the cloud yet").count() == 0, 4000), "banner: gone once synced")
+    go_home(page)
+
+    # 12e. an unreadable cloud doc is never written over
+    d = docs(page); d["state/userA"] = {"state": "{not json"}; set_docs(page, d)
+    ls_set(page, "pp2_trips", json.dumps([TRIP]))      # this device's cached copy (nothing packed)
+    page.reload(); home(page)
+    ok(page.get_by_text("Cloudville").count() == 1 and wait_dot(page, "amber", 4000), "broken doc: the app runs from this device's copy and shows not-synced")
+    open_trip(page); tap_item(page, "Alpha item"); page.wait_for_timeout(1500)
+    ok(docs(page)["state/userA"]["state"] == "{not json", "broken doc: an edit stays local — the unreadable cloud doc is left untouched for repair")
+    d = docs(page); d["state/userA"] = {"state": json.dumps({"trips": [TRIP]})}; set_docs(page, d)     # repaired elsewhere
+    ok(wait_for(lambda: (cloud_item(page, "i1") or {}).get("packed") is True, 6000) and wait_dot(page, "sage", 4000),
+       "broken doc: once repaired, the local edit is merged in and synced")
 
 
 with sync_playwright() as p:

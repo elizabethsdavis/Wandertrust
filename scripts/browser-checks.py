@@ -771,7 +771,9 @@ with sync_playwright() as p:
     # An empty new outfit is discarded, not saved
     page.get_by_role("button", name="Outfits", exact=False).first.click(); page.get_by_role("button", name="New outfit").click()
     page.get_by_role("button", name=re.compile(r"^Add new top")).wait_for(); page.get_by_role("button", name="Save outfit").first.click(); page.wait_for_timeout(200)
-    ok(len(saved()) == 4, "O14 saving an empty new outfit discards it")
+    ok(len(saved()) == 4 and page.get_by_role("status").filter(has_text="Nothing to save yet").count() == 1,
+       "O14 saving an empty new outfit saves nothing — and says so instead of closing silently (Sync Fix)")
+    page.locator("button[aria-label='Back']").first.click(); page.get_by_role("button", name="New outfit").wait_for()
 
     # ── F1–F5: the Fields batch — colour / brand / type entered separately, composed into one piece name ──
     def wmeta(): return json.loads(page.evaluate("localStorage.getItem('pp2_wardrobeMeta') || '{}'"))
@@ -942,7 +944,16 @@ with sync_playwright() as p:
        "WP5 the Next / Done bar is sticky at the bottom")
     page.get_by_role("button", name="Save outfit").first.click(); page.wait_for_timeout(300)
     ok(len(saved()) == 3 and saved()[-1]["slots"].get("top") == "Navy Ganni blazer", "WP4 the outfit saves with the picked top")
-    page.locator("button[aria-label='Close']").first.click(); page.locator("button[aria-label='Back']").first.click(); page.get_by_role("button", name="New Trip").wait_for()
+    page.locator("button[aria-label='Close']").first.click()
+    # ── S1–S2: the Sync Fix batch — "Save outfit" with nothing picked explains itself instead of vanishing ──
+    n_saved = len(saved())
+    page.get_by_role("button", name="New outfit").first.click(); page.get_by_role("button", name=re.compile(r"^Add new top")).wait_for()   # .first: a saved outfit may carry the default name
+    page.get_by_role("button", name="Save outfit").first.click(); page.wait_for_timeout(200)
+    ok(page.get_by_role("status").filter(has_text="Nothing to save yet").count() == 1 and page.get_by_role("button", name="Save outfit").count() >= 1 and len(saved()) == n_saved,
+       "S1 Save outfit with no pieces, photo or name keeps the editor open and says why (nothing silently dropped)")
+    page.locator("button[aria-label='Back']").first.click(); page.get_by_role("heading", name="Your closet").wait_for()
+    ok(len(saved()) == n_saved, "S2 the back arrow just closes an empty draft")
+    page.locator("button[aria-label='Back']").first.click(); page.get_by_role("button", name="New Trip").wait_for()
     page.evaluate("() => localStorage.clear()")
     page.screenshot(path=f"{SHOTS}/14-closet.png")
     page.evaluate("() => localStorage.clear()")
