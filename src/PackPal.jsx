@@ -34,7 +34,7 @@ import { Insights } from "./components/Insights";
 import { OutfitBuilder } from "./components/OutfitBuilder";
 import { Closet } from "./components/Closet";
 import { collectOutfitItems } from "./lib/outfits";
-import { renamePiece as renamePieceEverywhere, pieceUsage } from "./lib/pieces";
+import { renamePiece as renamePieceEverywhere, pieceUsage, pieceIndex } from "./lib/pieces";
 import { useAuth } from "./lib/auth";
 
 // ═══════════════════════════════════════════════════════════════
@@ -379,6 +379,7 @@ export default function PackPal() {
     return r;
   };
   const pieceUsageFor = (slotId, name) => pieceUsage(slotId, name, savedOutfits, trips);
+  const pieceIndexFor = (slotId) => pieceIndex({ slotId, wardrobe, wardrobeMeta, savedOutfits, trips }); // Picker batch: rows + where / when worn
   const { user } = useAuth(); // uid for outfit-photo Storage paths (local mode: "local-user")
   const categories = useMemo(() => resolveCategories(categoryMeta), [categoryMeta]);
   const [pickingTripIcon, setPickingTripIcon] = useState(false);
@@ -649,7 +650,7 @@ export default function PackPal() {
     return <><OutfitBuilder trip={activeTrip} savedOutfits={savedOutfits} setSavedOutfits={setSavedOutfits}
       wardrobe={wardrobe} setWardrobe={setWardrobe} wardrobeMeta={wardrobeMeta} setWardrobeMeta={setWardrobeMeta}
       customOccasions={customOccasions} setCustomOccasions={setCustomOccasions} uid={user?.id}
-      celebrate={celebrate} renamePiece={renamePiece} pieceUsageFor={pieceUsageFor}
+      celebrate={celebrate} renamePiece={renamePiece} pieceUsageFor={pieceUsageFor} pieceIndexFor={pieceIndexFor}
       onExit={() => setOutfitMode(false)}
       onSave={(occasions, dayNames, syncToList, dayEmojis, outfitIds) => {
         const planFields = { outfitPlan: occasions, outfitDayNames: dayNames, dayEmojis: dayEmojis || {}, outfitIds: Array.isArray(outfitIds) ? outfitIds : [] };
@@ -1404,7 +1405,7 @@ export default function PackPal() {
   if (view === "closet") {
     return <Closet savedOutfits={savedOutfits} setSavedOutfits={setSavedOutfits} trips={trips} setTrips={setTrips}
       wardrobe={wardrobe} setWardrobe={setWardrobe} wardrobeMeta={wardrobeMeta} setWardrobeMeta={setWardrobeMeta}
-      uid={user?.id} onExit={() => setView("home")} renamePiece={renamePiece} pieceUsageFor={pieceUsageFor} />;
+      uid={user?.id} onExit={() => setView("home")} renamePiece={renamePiece} pieceUsageFor={pieceUsageFor} pieceIndexFor={pieceIndexFor} />;
   }
 
   // ═══ INSIGHTS ═══
