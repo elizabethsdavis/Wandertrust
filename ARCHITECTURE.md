@@ -35,7 +35,8 @@ and **lights up cloud features when configured**. The guiding principles:
                             passkey, firebase,            content, history,
                             importHist, localMirror,      otdDefaults
                             merge, migrations, template,
-                            reorder, exportList, wardrobe
+                            reorder, exportList, wardrobe,
+                            outfits, photos, pieces
                                       │
                                       ▼
                             Firebase (Auth · Firestore · Functions · Storage)
@@ -76,13 +77,14 @@ keep the graph honest.
 | `template.js` | The packing template's pure logic: `templateBase()`, `expectedTemplateItems()`, `diffTripAgainstTemplate()`, `applyTemplateChanges()`, the `FLAGS` (refill / charge / laundry). |
 | `reorder.js` | `moveSection()` / `moveItem()` — rebuild `trip.items` for Arrange mode (order *is* array order). |
 | `exportList.js` | `tripToMarkdown()` / `markdownFileName()` — the shareable Markdown checklist. |
-| `wardrobe.js` | `parseItemMeta()` (colour family + shade + two-tone, pattern, brand from capitalization / known brands), `swatchBackground()`, `colorToHex()`; manual overrides come from the `wardrobeMeta` key. Fields batch: `composeItemName()` builds the "<Colour> <Brand> <type>" name from the editor's three fields, `structuredMeta()` / `applyMetaPatch()` keep what was typed (`colorName`, `type`) next to the overrides, `wardrobeBrands()` / `wardrobeTypes()` feed the form's suggestions. |
+| `wardrobe.js` | `parseItemMeta()` (colour family + shade + two-tone, pattern, brand from capitalization / known brands), `swatchBackground()`, `colorToHex()`; manual overrides come from the `wardrobeMeta` key. Fields batch: `composeItemName()` builds the "<Colour> <Brand> <type>" name from the editor's three fields, `structuredMeta()` keeps what was typed (`colorName`, `type`) next to the overrides, `wardrobeBrands()` / `wardrobeTypes()` feed the form's suggestions; Piece Edit batch: `splitItemName()` turns a name (typed fields or a legacy free-text name) back into the three fields. |
+| `pieces.js` | Piece Edit batch — renaming a wardrobe piece everywhere it is referenced: `renameInSlots()`, `renameInOccasions()`, `renameInOutfits()`, `renameInTrips()` (day plans + synced packing items), `renameWardrobe()` (merges onto an existing name), `renameMeta()`, `pieceUsage()`, and `renamePiece()` which runs them over the four stores and returns the new state. |
 | `addins.js` | Trip-type / weather add-ins (the `addins` key; defaults = `COND_ITEMS`): `addinItemsFor()` for `genList`, `detectConditions()` (rain / snow from forecast text), `WEATHER_KEYS` / `TYPE_KEYS` for the editor. |
 | `tripStatus.js` | `isPastTrip()` / `tripEndDate()` / `endedLabel()` — derived (never stored) "this trip is over" status for the read-only lock and the Home grouping. |
 | `version.js` | `APP_VERSION` (build stamp), `fetchDeployedVersion()`, `reloadApp(flush)`, `useUpdateAvailable()` — the reload button and the "newer version" banner. |
 | `categories.js` | `resolveCategories(meta)` — `CATEGORIES` with the user's label / emoji overrides (`categoryMeta` key) applied; `setCategoryOverride()`, `isCategoryOverridden()`, `EMOJI_SUGGESTIONS`. Render category names from this, never from `CATEGORIES` directly. |
 | `outfits.js` | The closet's pure logic (`savedOutfits` key): `newOutfit` / `updateOutfit`, `slotsKey` (de-dupe by pieces), `assignOutfit` / `detachOutfit` / `propagateOutfit` (trip occasions ↔ saved outfits), `collectOutfitItems` (packing sync = plan ∪ shortlist), `importOutfitsFromTrips` + `linkImportedOutfits`, `forgetOutfitInTrips`, `outfitUsage`. |
-| `photos.js` | Outfit photos: `preparePhoto()` (canvas resize → ≤1200 px JPEG + ~80 px thumb), `savePhoto()` (Firebase Storage `outfits/{uid}/{outfitId}.jpg` in cloud mode, a 320 px data URL in local mode), `deletePhoto()`, `photoSrc()` / `photoThumb()`. The only module that imports `firebase/storage`. |
+| `photos.js` | Outfit photos: `preparePhoto()` (canvas resize → ≤1200 px JPEG + a ~480 px card rendition + ~80 px thumb), `savePhoto()` (Firebase Storage `outfits/{uid}/{outfitId}.jpg` + `{outfitId}_card.jpg`, or a 320 px data URL in local mode), `deletePhoto()` (both objects), `photoSrc()` / `photoCard()` / `photoThumb()` (full image / card rendition / inline thumb). `storage = getStorage(app)` lives here, not in firebase.js. |
 
 ### `src/components/` — presentational + flow screens
 Flow screens: `AuthGate.jsx` (phone → OTP → passkey sign-in), `Account.jsx`
@@ -105,8 +107,8 @@ Props-only leaf components (no store access; extracted from `PackPal.jsx`):
 `FocusCharge.jsx`, `FocusLaundry.jsx`, `SmartRecsView.jsx`, `Insights.jsx`,
 `GlobalOtdEditor.jsx`, `ShareSheet.jsx` (copy / native share / download the
 Markdown export), `ArrangeList.jsx` (dnd-kit drag-and-drop of sections and
-items), `WardrobeMetaPicker.jsx` (fix a wardrobe item's colour / brand; the typed
-colour / type fields survive its Save and Auto),
+items), `PieceEditSheet.jsx` (edit a wardrobe piece: colour / brand / type fields,
+swatch override, rename — replaced `WardrobeMetaPicker.jsx`),
 `UpdateBanner.jsx` (mounted in `main.jsx`; "a newer version is ready"),
 `dnd.jsx` (shared dnd-kit sensors + grip handle for Arrange mode and the
 template editor), `EmojiPicker.jsx` (bottom sheet: suggestions + type any
