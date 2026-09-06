@@ -1,4 +1,4 @@
-"""PackPal browser regression checks (Tier 1 + Tier 2 audit fixes, the UX / Home Screen / rename batches, the Outfits batch O1–O14, the Fields batch F1–F5 and the Piece Edit batch PE1–PE6).
+"""PackPal browser regression checks (Tier 1 + Tier 2 audit fixes, the UX / Home Screen / rename batches, the Outfits batch O1–O14, the Fields batch F1–F5, the Piece Edit batch PE1–PE6 and the Picker batch WP1–WP5).
 
 Drives the production build in LOCAL_MODE (no Firebase env, pure localStorage)
 with Playwright + Chromium and asserts each audit fix from a real browser:
@@ -384,9 +384,10 @@ with sync_playwright() as p:
     add_in_current_slot("Blue Zevelyn jeans")            # → Layer
     page.evaluate("""() => { [...document.querySelectorAll('button')].filter(b=>b.style.height==='10px')[1].click(); }""")  # back to Bottoms
     page.wait_for_timeout(300)
-    ok(page.get_by_text("Zevelyn", exact=True).count() == 1, "U5 wardrobe card shows the capitalized brand 'Zevelyn'")
-    SWATCH_JS = """(brand) => { const row=[...document.querySelectorAll("[title='Edit this piece']")].find(r=>r.textContent===brand); return row ? getComputedStyle(row.firstElementChild).backgroundColor : null; }"""
-    sw = page.evaluate(SWATCH_JS, "Zevelyn")
+    ok(page.get_by_text("Zevelyn", exact=True).count() == 1, "U5 the wardrobe row shows the capitalized brand 'Zevelyn'")
+    # Picker batch: rows carry data-piece="<name>" and their swatch dot data-swatch
+    SWATCH_JS = """(name) => { const row=[...document.querySelectorAll("[data-piece]")].find(r=>r.dataset.piece===name); const sw=row && row.querySelector("[data-swatch]"); return sw ? getComputedStyle(sw).backgroundColor : null; }"""
+    sw = page.evaluate(SWATCH_JS, "Blue Zevelyn jeans")
     ok(sw == "rgb(123, 163, 201)", f"U5 swatch is the blue family ({sw})")
     # Piece Edit batch: the row opens the "Edit piece" sheet — a legacy free-text name comes back as colour / brand / type
     page.get_by_label("Edit Blue Zevelyn jeans").click()
@@ -399,7 +400,7 @@ with sync_playwright() as p:
        and page.get_by_role("button", name="Save & rename").count() == 1, "PE1 editing the brand previews the new name and switches the button to 'Save & rename'")
     page.get_by_role("button", name="Save & rename").click()
     page.wait_for_timeout(300)
-    sw2 = page.evaluate(SWATCH_JS, "Levi's")
+    sw2 = page.evaluate(SWATCH_JS, "Blue Levi's jeans")
     meta = json.loads(page.evaluate("localStorage.getItem('pp2_wardrobeMeta') || '{}'"))
     wb = json.loads(page.evaluate("localStorage.getItem('pp2_wardrobe') || '{}'"))
     levis = meta.get("Blue Levi's jeans")
@@ -787,7 +788,7 @@ with sync_playwright() as p:
        f"F1 the piece is named 'Black Lululemon flowy pants' and what was typed is kept in wardrobeMeta ({wmeta().get('Black Lululemon flowy pants')})")
     page.evaluate("""() => { [...document.querySelectorAll('button')].filter(b=>b.style.height==='10px')[0].click(); }""")  # back to Top
     page.wait_for_timeout(300)
-    ok(page.get_by_text("Black Lululemon flowy pants", exact=True).count() >= 1 and page.evaluate(SWATCH_JS, "Lululemon") == "rgb(45, 41, 38)",
+    ok(page.get_by_text("Black Lululemon flowy pants", exact=True).count() >= 1 and page.evaluate(SWATCH_JS, "Black Lululemon flowy pants") == "rgb(45, 41, 38)",
        "F1 the wardrobe card shows the brand chip and the black swatch, and the piece is the slot's pick")
     # F2: Enter hops colour → brand → type, Enter on the type adds; brand optional; the type keeps its own casing
     page.evaluate("""() => { [...document.querySelectorAll('button')].filter(b=>b.style.height==='10px')[1].click(); }""")  # Bottoms
@@ -826,11 +827,11 @@ with sync_playwright() as p:
     ok(page.get_by_label("Edit colour").input_value() == "Black" and page.get_by_label("Edit brand").input_value() == "Lululemon" and page.get_by_label("Edit type").input_value() == "flowy pants",
        "PE2 a piece entered through the fields comes back exactly as typed")
     page.get_by_role("button", name="Colour Blue").click(); page.get_by_role("button", name="Save", exact=True).last.click(); page.wait_for_timeout(300)   # .last = the sheet's Save (the editor header also says Save here)
-    ok(wmeta().get("Black Lululemon flowy pants") == {"colorName": "Black", "brand": "Lululemon", "type": "flowy pants", "color": "blue"} and page.evaluate(SWATCH_JS, "Lululemon") == "rgb(123, 163, 201)",
+    ok(wmeta().get("Black Lululemon flowy pants") == {"colorName": "Black", "brand": "Lululemon", "type": "flowy pants", "color": "blue"} and page.evaluate(SWATCH_JS, "Black Lululemon flowy pants") == "rgb(123, 163, 201)",
        f"F5 a swatch override is stored next to the typed fields, the name stays ({wmeta().get('Black Lululemon flowy pants')})")
     page.get_by_label("Edit Black Lululemon flowy pants").click(); page.get_by_role("dialog", name="Edit Black Lululemon flowy pants").wait_for()
     page.get_by_role("button", name="Colour Black").click(); page.get_by_role("button", name="Save", exact=True).last.click(); page.wait_for_timeout(300)
-    ok(wmeta().get("Black Lululemon flowy pants") == {"colorName": "Black", "brand": "Lululemon", "type": "flowy pants"} and page.evaluate(SWATCH_JS, "Lululemon") == "rgb(45, 41, 38)",
+    ok(wmeta().get("Black Lululemon flowy pants") == {"colorName": "Black", "brand": "Lululemon", "type": "flowy pants"} and page.evaluate(SWATCH_JS, "Black Lululemon flowy pants") == "rgb(45, 41, 38)",
        f"F5 picking the auto-detected family again drops the override, the typed fields stay ({wmeta().get('Black Lululemon flowy pants')})")
     # PE6 (parser): descriptor words that start a name ("Hair clips", "Wide-leg trousers") no longer read as brands
     page.evaluate("""() => { [...document.querySelectorAll('button')].filter(b=>b.style.height==='10px')[8].click(); }""")  # Hair Accessory
@@ -886,6 +887,63 @@ with sync_playwright() as p:
     ok(day0["slots"].get("top") == "Black Lululemon wide-leg pants" and day0.get("customized") is False and [o for o in saved() if o["name"] == "Fields test"][0]["slots"].get("top") == "Black Lululemon wide-leg pants",
        "PE5 the saved plan carries the new name on Travel Day, still linked and un-customized, and the closet outfit matches")
     go_home(page)
+
+    # ── WP1–WP5: the Picker batch — a big wardrobe as a searchable, filterable, grouped list; one tap picks, ⋯ edits ──
+    page.evaluate("() => localStorage.clear()")
+    tops = ["Black Lululemon flowy pants", "Cream cashmere top", "Black SKIMS bodysuit", "Blue Zevelyn jeans", "Black and white striped tee", "Hair clips", "Cream Aritzia satin blouse", "Navy Ganni blazer", "Pink Aritzia cami"]
+    seed_outfits = [{"id": "so1", "name": "Gallery day", "slots": {"top": "Cream cashmere top"}, "photo": None, "createdAt": "2026-08-01T00:00:00Z", "updatedAt": "2026-08-01T00:00:00Z"},
+                    {"id": "so2", "name": "Brunch", "slots": {"top": "Black SKIMS bodysuit"}, "photo": None, "createdAt": "2026-09-01T00:00:00Z", "updatedAt": "2026-09-01T00:00:00Z"}]
+    seed_trip = {"id": "wp1", "destination": "Kyoto", "tripType": ["City Trip"], "days": 2, "weather": "mild", "startDate": "2026-09-04", "tempRange": [15, 24], "items": [], "otdItems": [], "otdChecked": {}, "createdAt": "2026-09-01T00:00:00Z", "icon": "🏯",
+                 "outfitDayNames": ["Travel Day", "Temple Day"], "outfitPlan": [[{"id": "wo1", "type": "daytime", "label": "Travel Day", "slots": {"top": "Black Lululemon flowy pants"}}], [{"id": "wo2", "type": "daytime", "label": "Temple Day", "slots": {"top": "Cream cashmere top"}}]]}
+    page.evaluate("""(d) => { localStorage.setItem('pp2_wardrobe', JSON.stringify({ top: d.tops })); localStorage.setItem('pp2_wardrobeMeta', JSON.stringify({ "Black Lululemon flowy pants": { colorName: "Black", brand: "Lululemon", type: "flowy pants" } }));
+      localStorage.setItem('pp2_savedOutfits', JSON.stringify(d.outfits)); localStorage.setItem('pp2_trips', JSON.stringify([d.trip])); }""", {"tops": tops, "outfits": seed_outfits, "trip": seed_trip})
+    page.goto(BASE + "/"); page.get_by_role("button", name="New Trip").wait_for()
+    page.get_by_role("button", name=re.compile(r"^My Outfits")).click(); page.get_by_role("heading", name="Your closet").wait_for()
+    page.get_by_role("button", name="New outfit").click(); page.get_by_label("Find a top").wait_for()
+    rows = page.locator("[data-piece]")
+    ok(rows.count() == len(tops) + 3 and page.get_by_text("Recently worn").count() == 1 and page.get_by_text("Black · 3", exact=True).count() == 1 and page.get_by_text("Cream · 2", exact=True).count() == 1 and page.get_by_text("Other · 1", exact=True).count() == 1,
+       f"WP1 a 9-piece wardrobe lists as 'Recently worn' (3) + colour groups with counts ({rows.count()} rows)")
+    recent = [rows.nth(i).get_attribute("data-piece") for i in range(3)]
+    ok(recent == ["Black Lululemon flowy pants", "Cream cashmere top", "Black SKIMS bodysuit"], f"WP1 Recently worn is newest first: the Kyoto trip pieces, then the Brunch outfit ({recent})")
+    ok(page.get_by_text("Kyoto · Travel Day", exact=False).count() >= 1 and page.get_by_text("Brunch", exact=False).count() >= 1, "WP1 rows say where the piece was last worn")
+    ok(page.get_by_role("button", name="Remove from wardrobe").count() == 0 and page.get_by_role("button", name="Edit Blue Zevelyn jeans").count() == 1 and page.get_by_role("button", name="Blue Zevelyn jeans", exact=True).count() == 1,
+       "WP1 no × on the rows — one pick target and one ⋯ per row")
+    # WP2: search
+    page.get_by_label("Find a top").fill("lulu"); page.wait_for_timeout(200)
+    ok(rows.count() == 1 and rows.first.get_attribute("data-piece") == "Black Lululemon flowy pants" and page.get_by_text("Recently worn").count() == 0, "WP2 typing filters the list flat (brand word)")
+    page.get_by_label("Find a top").fill("black tee"); page.wait_for_timeout(200)
+    ok(rows.count() == 1 and rows.first.get_attribute("data-piece") == "Black and white striped tee", "WP2 every word must match")
+    page.get_by_label("Find a top").fill("olive tank"); page.wait_for_timeout(200)
+    ok(rows.count() == 0 and page.get_by_text("No tops match “olive tank”.").count() == 1, "WP2 nothing matches → says so")
+    page.get_by_role("button", name="Add “olive tank” as a new top").click(); page.get_by_label("Piece type").wait_for()
+    ok(page.get_by_label("Piece colour").input_value() == "olive" and page.get_by_label("Piece type").input_value() == "tank" and page.evaluate("document.activeElement && document.activeElement.getAttribute('aria-label')") == "Piece type",
+       "WP2 'Add “olive tank”' opens the form with the query carved into colour + type, focus on the type")
+    page.get_by_role("button", name="Cancel").click(); page.wait_for_timeout(150)
+    ok(page.get_by_label("Find a top").input_value() == "" and rows.count() == len(tops) + 3, "WP2 cancelling clears the search and the full list is back")
+    # WP3: chips
+    page.get_by_role("button", name="Only black").click(); page.wait_for_timeout(200)
+    ok(rows.count() == 3 and all("Black" in rows.nth(i).get_attribute("data-piece") for i in range(3)) and page.get_by_text("Recently worn").count() == 0, "WP3 a colour chip shows only that family, flat")
+    page.get_by_role("button", name="Only Aritzia").click(); page.wait_for_timeout(200)
+    ok(rows.count() == 2 and sorted(rows.nth(i).get_attribute("data-piece") for i in range(2)) == ["Cream Aritzia satin blouse", "Pink Aritzia cami"], "WP3 a brand chip shows only that brand (and replaces the colour chip)")
+    page.get_by_role("button", name="All", exact=True).click(); page.wait_for_timeout(200)
+    ok(rows.count() == len(tops) + 3, "WP3 'All' clears the chips")
+    # WP4: one tap picks (and auto-advances), ⋯ opens the edit sheet
+    page.get_by_role("button", name="Navy Ganni blazer", exact=True).click(); page.wait_for_timeout(500)
+    ok(page.get_by_role("heading", name="Bottoms").count() == 1 and page.get_by_text("Navy Ganni blazer", exact=False).count() >= 1, "WP4 tapping a row picks it and moves on to Bottoms (the pick shows in the preview chips)")
+    page.evaluate("""() => { [...document.querySelectorAll('button')].filter(b=>b.style.height==='10px')[0].click(); }""")  # back to Top
+    page.wait_for_timeout(200)
+    ok(page.get_by_role("button", name="Navy Ganni blazer", exact=True).get_attribute("aria-pressed") == "true", "WP4 the picked row is marked pressed back on the Top step")
+    page.get_by_role("button", name="Edit Navy Ganni blazer").click(); page.get_by_role("dialog", name="Edit Navy Ganni blazer").wait_for()
+    ok(page.get_by_label("Edit colour").input_value() == "Navy" and page.get_by_label("Edit brand").input_value() == "Ganni" and page.get_by_role("button", name="Remove from wardrobe").count() == 0,
+       "WP4 ⋯ opens the Edit piece sheet; the current pick can't be removed from there")
+    page.get_by_role("button", name="Close").click(); page.wait_for_timeout(150)
+    # WP5: the navigation bar stays reachable under a long list
+    ok(page.evaluate("""() => { const b=[...document.querySelectorAll('button')].find(x=>/^Next/.test(x.textContent)); const bar=b && b.parentElement; return bar ? getComputedStyle(bar).position : null; }""") == "sticky",
+       "WP5 the Next / Done bar is sticky at the bottom")
+    page.get_by_role("button", name="Save outfit").first.click(); page.wait_for_timeout(300)
+    ok(len(saved()) == 3 and saved()[-1]["slots"].get("top") == "Navy Ganni blazer", "WP4 the outfit saves with the picked top")
+    page.locator("button[aria-label='Close']").first.click(); page.locator("button[aria-label='Back']").first.click(); page.get_by_role("button", name="New Trip").wait_for()
+    page.evaluate("() => localStorage.clear()")
     page.screenshot(path=f"{SHOTS}/14-closet.png")
     page.evaluate("() => localStorage.clear()")
 
