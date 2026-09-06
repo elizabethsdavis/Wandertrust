@@ -13,7 +13,7 @@ import { newOutfit, updateOutfit, matchesQuery, outfitUsage, forgetOutfitInTrips
 import { savePhoto, deletePhoto } from "../lib/photos";
 import { renameInSlots } from "../lib/pieces";
 
-export function Closet({ savedOutfits, setSavedOutfits, trips, setTrips, wardrobe, setWardrobe, wardrobeMeta, setWardrobeMeta, uid, onExit, renamePiece, pieceUsageFor }) {
+export function Closet({ savedOutfits, setSavedOutfits, trips, setTrips, wardrobe, setWardrobe, wardrobeMeta, setWardrobeMeta, uid, onExit, renamePiece, pieceUsageFor, pieceIndexFor }) {
   const saved = savedOutfits || [];
   const [q, setQ] = useState("");
   const [openId, setOpenId] = useState(null);
@@ -91,7 +91,7 @@ export function Closet({ savedOutfits, setSavedOutfits, trips, setTrips, wardrob
           const to = r?.finalName || args.newName;
           setEditing((e) => (e?.draft ? { ...e, draft: { ...e.draft, slots: renameInSlots(e.draft.slots || {}, args.slotId, args.oldName, to) } } : e));
           return r;
-        }} pieceUsageFor={pieceUsageFor}
+        }} pieceUsageFor={pieceUsageFor} pieceIndexFor={pieceIndexFor}
         onDone={finishEdit} doneLabel={editing.id ? "Save" : "Save outfit"} />
     );
   }

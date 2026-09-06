@@ -11,15 +11,16 @@
 //   onRenamePiece({ slotId, oldName, newName, entry }) → { finalName }   (Piece Edit batch) the parent
 //                        renames the piece in every store AND in its own drafts (incl. these `slots`)
 //   pieceUsageFor(slotId, name) → { outfits, days, items }   for the edit sheet's note
+//   pieceIndexFor(slotId) → pieceIndex() rows   (Picker batch) what the wardrobe picker lists
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Check, X, Plus, ChevronLeft, ChevronRight, Camera, Loader, Trash2, Shirt, Palette, Shield, Footprints, ShoppingBag, Gem, Watch, Eye, Star } from "lucide-react";
 import { C, F } from "../lib/theme";
 import { Btn } from "./ui";
-import { WardrobeCarousel } from "./WardrobeCarousel";
+import { WardrobePicker } from "./WardrobePicker";
 import { OUTFIT_SLOT_DEFS } from "../data/outfitSlots";
 import { photoSrc } from "../lib/photos";
-import { composeItemName, structuredMeta, parseItemMeta, swatchBackground, wardrobeBrands, wardrobeTypes, COLOR_FAMILY_IDS } from "../lib/wardrobe";
-import { renameWardrobe, renameMeta } from "../lib/pieces";
+import { composeItemName, structuredMeta, parseItemMeta, swatchBackground, wardrobeBrands, wardrobeTypes, splitItemName, COLOR_FAMILY_IDS } from "../lib/wardrobe";
+import { renameWardrobe, renameMeta, pieceIndex } from "../lib/pieces";
 
 const ICONS = { top: Shirt, bottom: Palette, layer: Shield, shoes: Footprints, bag: ShoppingBag, necklace: Gem, bracelet: Watch, eyewear: Eye, hair: Star };
 /** The slot table with its Lucide icon attached (what the old OUTFIT_SLOTS was). */
@@ -50,12 +51,12 @@ const fieldLabel = { fontFamily: F.body, fontSize: 10.5, fontWeight: 600, textTr
  * brand → type, Enter on the type adds. A type or a brand is required (a
  * brand-only piece like "Black Longchamp" is fine).
  */
-function NewPieceForm({ slot, brands, types, onAdd, onCancel }) {
-  const [color, setColor] = useState("");
-  const [brand, setBrand] = useState("");
-  const [type, setType] = useState("");
+function NewPieceForm({ slot, brands, types, onAdd, onCancel, initial }) {
+  const [color, setColor] = useState(initial?.color || "");
+  const [brand, setBrand] = useState(initial?.brand || "");
+  const [type, setType] = useState(initial?.type || "");
   const colorRef = useRef(null), brandRef = useRef(null), typeRef = useRef(null);
-  useEffect(() => { colorRef.current?.focus(); }, []);
+  useEffect(() => { (initial?.type ? typeRef : colorRef).current?.focus(); }, [initial]);
   const name = composeItemName({ color, brand, type });
   const preview = name ? parseItemMeta(name, structuredMeta({ color, brand, type }) || undefined) : null;
   const swatch = preview ? swatchBackground(preview) : null;
@@ -115,11 +116,11 @@ function NewPieceForm({ slot, brands, types, onAdd, onCancel }) {
 
 export function OutfitEditor({ title, subtitle, name, onName, namePlaceholder = "Name this outfit", slots, onSlots,
   wardrobe, setWardrobe, wardrobeMeta, setWardrobeMeta, photo, onPickPhoto, onRemovePhoto, photoBusy, photoError,
-  footer, onDone, onCancel, doneLabel = "Done", startSlot = 0, onRenamePiece, pieceUsageFor }) {
+  footer, onDone, onCancel, doneLabel = "Done", startSlot = 0, onRenamePiece, pieceUsageFor, pieceIndexFor }) {
   const [slotIdx, setSlotIdx] = useState(startSlot);
-  const [addingNew, setAddingNew] = useState(false);
+  const [addingNew, setAddingNew] = useState(null); // null | { color, brand, type } prefill for the "Add new" form
   useEffect(() => { window.scrollTo(0, 0); }, [slotIdx]);
-  useEffect(() => { setAddingNew(false); }, [slotIdx]);
+  useEffect(() => { setAddingNew(null); }, [slotIdx]);
 
   const totalSlots = OUTFIT_SLOTS.length;
   const currentSlot = OUTFIT_SLOTS[slotIdx];
@@ -162,8 +163,12 @@ export function OutfitEditor({ title, subtitle, name, onName, namePlaceholder = 
     if (meta && !existing) setWardrobeMeta?.((prev) => ({ ...(prev || {}), [finalName]: { ...((prev || {})[finalName] || {}), ...meta } }));   // an existing piece keeps its own details
     const alreadyOn = selectedIsMulti ? selectedValue.includes(finalName) : selectedValue === finalName;
     if (!alreadyOn) setSlotValue(finalName, true);
-    setAddingNew(false);
+    setAddingNew(null);
   };
+  // The picker's rows (Picker batch): the app shell's index (with where / when each piece was worn) or a bare one.
+  const pickerIndex = useMemo(() => (pieceIndexFor ? pieceIndexFor(currentSlot.id) : pieceIndex({ slotId: currentSlot.id, wardrobe, wardrobeMeta })), [pieceIndexFor, currentSlot.id, wardrobe, wardrobeMeta]);
+  // "+" or "Add “query” as a new …": open the form, prefilled by carving the query into colour / brand / type.
+  const openAddForm = (query) => setAddingNew(query ? splitItemName(query) : { color: "", brand: "", type: "" });
   // "Edit piece" sheet: same name → store the details; new name → the parent renames it everywhere
   // (falls back to this wardrobe + these slots when no parent handler is wired).
   const editPiece = ({ name: oldName, newName, entry }) => {
@@ -290,27 +295,21 @@ export function OutfitEditor({ title, subtitle, name, onName, namePlaceholder = 
           )
         )}
 
-        {/* Wardrobe */}
-        <div style={{ marginBottom: 16 }}>
-          {(wardrobe?.[currentSlot.id] || []).length > 0 && (
-            <div style={{ fontFamily: F.body, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: C.warmGray, marginBottom: 10, paddingLeft: 4 }}>Your wardrobe</div>
-          )}
-          <WardrobeCarousel slotId={currentSlot.id} wardrobe={wardrobe || {}} wardrobeMeta={wardrobeMeta}
-            onEditPiece={editPiece} usageFor={(n) => pieceUsageFor?.(currentSlot.id, n)}
-            onSelect={(item) => setSlotValue(item, true)} selected={selectedValue}
-            onRemoveItem={(item) => setWardrobe?.((prev) => ({ ...(prev || {}), [currentSlot.id]: ((prev || {})[currentSlot.id] || []).filter((i) => i !== item) }))} />
-        </div>
-
-        {/* Add new item — colour / brand / type in separate fields */}
-        {addingNew ? (
-          <NewPieceForm key={currentSlot.id} slot={currentSlot} brands={brandSuggestions} types={typeSuggestions} onAdd={addPiece} onCancel={() => setAddingNew(false)} />
-        ) : (
-          <button onClick={() => setAddingNew(true)}
-            style={{ width: "100%", padding: "14px 18px", borderRadius: 14, border: `2px dashed ${C.borderMedium}`, background: C.copperSubtle, cursor: "pointer",
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: F.body, fontSize: 14, color: C.copper }}>
-            <Plus size={16} /> Add {selectedIsMulti ? "another" : "new"} {currentSlot.label.toLowerCase()}
-          </button>
+        {/* Add new item — colour / brand / type in separate fields (shown above the list so it never hides below a long wardrobe) */}
+        {addingNew && (
+          <div style={{ marginBottom: 14 }}>
+            <NewPieceForm key={currentSlot.id} slot={currentSlot} brands={brandSuggestions} types={typeSuggestions} initial={addingNew} onAdd={addPiece} onCancel={() => setAddingNew(null)} />
+          </div>
         )}
+
+        {/* Wardrobe picker: search, chips, Recently worn, colour groups; ⋯ edits (Picker batch) */}
+        <div style={{ marginBottom: 16 }}>
+          <WardrobePicker slotId={currentSlot.id} index={pickerIndex} wardrobeMeta={wardrobeMeta} selected={selectedValue} adding={!!addingNew}
+            onSelect={(item) => setSlotValue(item, true)}
+            onEditPiece={editPiece} usageFor={(n) => pieceUsageFor?.(currentSlot.id, n)}
+            onRemoveItem={(item) => setWardrobe?.((prev) => ({ ...(prev || {}), [currentSlot.id]: ((prev || {})[currentSlot.id] || []).filter((i) => i !== item) }))}
+            onAddNew={openAddForm} />
+        </div>
         {selectedIsMulti && selectedValue.length > 0 && (
           <button onClick={goNext} style={{ width: "100%", marginTop: 10, padding: 12, borderRadius: 12, border: `1.5px solid ${C.sage}`, background: C.sageGlow, cursor: "pointer",
             fontFamily: F.body, fontSize: 13, fontWeight: 600, color: C.sage, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
@@ -326,8 +325,8 @@ export function OutfitEditor({ title, subtitle, name, onName, namePlaceholder = 
 
       {footer && <div style={{ padding: "0 20px 12px" }}>{footer}</div>}
 
-      {/* Navigation */}
-      <div style={{ padding: "12px 20px 32px", display: "flex", gap: 12, borderTop: `1px solid ${C.borderLight}`, background: "rgba(253,248,240,.95)" }}>
+      {/* Navigation — sticky, so Next / Done stay reachable under a long wardrobe list (Picker batch) */}
+      <div style={{ position: "sticky", bottom: 0, zIndex: 5, padding: "12px 20px 28px", display: "flex", gap: 12, borderTop: `1px solid ${C.borderLight}`, background: "rgba(253,248,240,.95)", backdropFilter: "blur(8px)" }}>
         {slotIdx > 0 && <Btn v="secondary" sz="md" onClick={goPrev} aria-label="Previous slot" style={{ flex: 0 }}><ChevronLeft size={16} /></Btn>}
         {slotIdx < totalSlots - 1 ? (
           <Btn v="primary" sz="md" onClick={goNext} style={{ flex: 1 }}>Next <ChevronRight size={16} /></Btn>

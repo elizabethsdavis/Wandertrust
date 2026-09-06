@@ -102,7 +102,7 @@ function OccasionTypePicker({ types, onPick, onCreate, onCancel }) {
   );
 }
 
-export function OutfitBuilder({ trip, savedOutfits, setSavedOutfits, wardrobe, setWardrobe, wardrobeMeta, setWardrobeMeta, customOccasions, setCustomOccasions, uid, onSave, onExit, celebrate, renamePiece, pieceUsageFor }) {
+export function OutfitBuilder({ trip, savedOutfits, setSavedOutfits, wardrobe, setWardrobe, wardrobeMeta, setWardrobeMeta, customOccasions, setCustomOccasions, uid, onSave, onExit, celebrate, renamePiece, pieceUsageFor, pieceIndexFor }) {
   const allOccasionTypes = useMemo(() => [...OCCASION_TYPES, ...(customOccasions || [])], [customOccasions]);
   const saved = savedOutfits || [];
   const byId = useMemo(() => new Map(saved.map((o) => [o.id, o])), [saved]);
@@ -296,7 +296,7 @@ export function OutfitBuilder({ trip, savedOutfits, setSavedOutfits, wardrobe, s
         photo={d.photo} photoBusy={photoBusy} photoError={photoError}
         onPickPhoto={(file) => pickPhoto(d.id, file, (photo) => setEditing((e) => ({ ...e, draft: { ...e.draft, photo } })))}
         onRemovePhoto={() => { deletePhoto(d.photo); setEditing((e) => ({ ...e, draft: { ...e.draft, photo: null } })); }}
-        onRenamePiece={onRenamePiece} pieceUsageFor={pieceUsageFor}
+        onRenamePiece={onRenamePiece} pieceUsageFor={pieceUsageFor} pieceIndexFor={pieceIndexFor}
         onDone={finishOutfitEdit} doneLabel={editing.id ? "Save" : "Save outfit"} />
     );
   }
@@ -319,7 +319,7 @@ export function OutfitBuilder({ trip, savedOutfits, setSavedOutfits, wardrobe, s
         name={occ.label} onName={(v) => patchOccasion(editing.dayIdx, editing.occIdx, (o) => ({ ...o, label: v }))} namePlaceholder="Occasion"
         slots={occ.slots || {}} onSlots={(u) => setOccSlots(editing, u)}
         wardrobe={wardrobe} setWardrobe={setWardrobe} wardrobeMeta={wardrobeMeta} setWardrobeMeta={setWardrobeMeta}
-        onRenamePiece={onRenamePiece} pieceUsageFor={pieceUsageFor}
+        onRenamePiece={onRenamePiece} pieceUsageFor={pieceUsageFor} pieceIndexFor={pieceIndexFor}
         footer={footer} onDone={() => { setEditing(null); haptic("success"); }} />
     );
   }
