@@ -14,7 +14,7 @@
 //    modifiers, patterns, materials or garment nouns. A capitalized first word
 //    that is a colour ("Cream cashmere top") is a colour, not a brand. A handful
 //    of known brands still match in lowercase so older names keep their chip.
-//  • wardrobeMeta overrides (from "tap the swatch to fix it") win over parsing.
+//  • wardrobeMeta overrides (`color` / `brand`, set from the "Edit piece" sheet) win over parsing.
 //
 // Pure, no imports. Tested in node (scripts/node-checks).
 
@@ -43,7 +43,9 @@ const LIGHTEN = new Set(["light", "pale", "pastel", "soft", "baby", "washed", "f
 const DARKEN = new Set(["dark", "deep", "rich"]);
 export const PATTERNS = ["striped", "stripe", "stripes", "floral", "plaid", "checked", "check", "gingham", "polka dot", "polka dots", "polka", "houndstooth", "tweed", "paisley", "tie-dye", "tie dye", "camo", "camouflage", "snakeskin", "zebra", "leopard", "cheetah", "animal print", "printed", "print", "ombre", "colorblock", "colourblock", "color-block", "graphic", "embroidered", "lace"];
 const MATERIALS = new Set(["cotton", "linen", "silk", "satin", "cashmere", "wool", "knit", "denim", "leather", "suede", "velvet", "chiffon", "tulle", "mesh", "fleece", "jersey", "nylon", "corduroy", "canvas", "faux", "vegan", "ribbed", "sheer", "puffer", "quilted"]);
-const GARMENT_WORDS = new Set(("top tops tee tees t-shirt tshirt shirt blouse sweater cardigan jacket coat blazer trench parka vest dress gown skirt pants jeans trousers shorts leggings joggers sweatpants hoodie sweatshirt tank cami camisole bodysuit jumpsuit romper set co-ord bag purse clutch tote backpack crossbody boots bootie booties sneakers sandals heels flats loafers mules slides shoes pumps wedges espadrilles necklace necklaces bracelet bracelets earrings earring ring rings watch sunglasses glasses eyeglasses hat cap beanie scarf belt socks tights bikini swimsuit one-piece cover-up coverup robe pajamas pyjamas slippers gloves clip clips headband bonnet bra underwear bralette").split(" "));
+const GARMENT_WORDS = new Set(("top tops tee tees t-shirt tshirt shirt blouse sweater cardigan jacket coat blazer trench parka vest dress gown skirt pants jeans trousers shorts leggings joggers sweatpants hoodie sweatshirt tank cami camisole bodysuit jumpsuit romper set co-ord bag purse clutch tote backpack crossbody boots bootie booties sneakers sandals heels flats loafers mules slides shoes pumps wedges espadrilles necklace necklaces bracelet bracelets earrings earring ring rings watch sunglasses glasses eyeglasses hat cap beanie scarf belt socks tights bikini swimsuit one-piece cover-up coverup robe pajamas pyjamas slippers gloves clip clips headband bonnet bra underwear bralette "
+  // descriptors that start many names and are not brands (Piece Edit batch — keeps "Hair clips" / "Wide-leg trousers" from growing a brand chip)
+  + "hair wide-leg wide leg high-waisted high waisted cropped crop oversized long short sleeve sleeveless mini midi maxi flowy fitted slim straight relaxed baggy boxy flare flared bootcut skinny layered chunky dainty statement artsy diamond pearl pearls crystal beaded woven straw raffia platform strappy ankle knee thigh chelsea combat hiking running training sports contour seamless compression thermal bomber moto utility cargo pleated ruched smocked wrap halter strapless off-shoulder turtleneck mock crew v-neck scoop square button-down button-up collared polo henley tunic kaftan caftan sarong kimono poncho shawl cape gilet anorak windbreaker raincoat overcoat peacoat duster shacket pendant chain cuff bangle hoop hoops studs stud claw scrunchie barrette").split(" "));
 const KNOWN_BRANDS = ["zevelyn", "diarrablu", "longchamp", "doc martens", "doc marten", "gucci", "fenty", "nike", "ugg", "birkenstock", "away", "heattech", "aritzia", "lululemon", "adidas", "zara", "reformation", "skims", "levi's", "levis", "madewell", "everlane", "uniqlo", "converse", "vans", "new balance", "prada", "chanel", "coach", "dior", "hermes", "hermès", "louis vuitton", "celine", "céline", "bottega", "ganni", "sezane", "sézane"];
 
 const allColorNames = Object.entries(COLOR_FAMILIES)
@@ -211,9 +213,10 @@ export function structuredMeta({ color, brand, type } = {}) {
 }
 
 /**
- * Apply a "Fix details" patch ({ color?, brand? }, or null = back to automatic)
- * on top of an item's entry, keeping its structured fields. Returns the entry to
- * store, or null when nothing is left (delete the key).
+ * Layer a { color?, brand? } correction (or null = none) over an entry, keeping
+ * its typed fields. Kept exported: the previous OutfitEditor imports it, and the
+ * web-upload order ships src/lib before src/components, so the interim Vercel
+ * build must still find it.
  */
 export function applyMetaPatch(existing, patch) {
   const keep = {};
@@ -239,4 +242,50 @@ export function wardrobeBrands(wardrobe, wardrobeMeta) {
 /** Distinct types recorded for one slot (structured entries only) — suggestions for the type field. */
 export function wardrobeTypes(wardrobe, wardrobeMeta, slotId) {
   return uniqSorted((wardrobe?.[slotId] || []).map((it) => wardrobeMeta?.[it]?.type));
+}
+
+// ── editing an existing piece (Piece Edit batch) ──
+
+const JOINERS = /^(?:\s*(?:and|&|\/|with)\s*)$/i;
+
+/**
+ * splitItemName(name, meta) → { color, brand, type } to prefill the edit form.
+ * A piece entered through the fields gives back exactly what was typed
+ * (colorName / brand / type). An older free-text name is carved up: the colour
+ * phrase (with its light/dark modifier and a second tone joined by "and" / "&" /
+ * "/"), the brand as it appears in the name (a manual brand override wins), and
+ * whatever is left is the type. composeItemName() of the result reproduces the
+ * original name for the usual "<Colour> <Brand> <type>" shape.
+ */
+export function splitItemName(name, meta) {
+  const raw = tidy(name);
+  const hasStored = !!(tidy(meta?.colorName) || tidy(meta?.type));
+  if (hasStored) return { color: tidy(meta?.colorName), brand: tidy(meta?.brand), type: tidy(meta?.type) };
+  if (!raw) return { color: "", brand: "", type: "" };
+  const lowerRaw = raw.toLowerCase();
+  const spans = [];
+  // colour phrase: first colour hit, extended backwards over a modifier and forwards over "and <colour>"
+  const hits = findPhrases(lowerRaw, allColorNames.map((c) => c.name));
+  let color = "";
+  if (hits.length) {
+    let start = hits[0].index, end = start + hits[0].phrase.length;
+    const before = lowerRaw.slice(0, start).match(/(\S+)\s+$/);
+    if (before && MODIFIERS.has(before[1])) start -= before[0].length;
+    if (hits[1] && JOINERS.test(lowerRaw.slice(end, hits[1].index))) end = hits[1].index + hits[1].phrase.length;
+    color = raw.slice(start, end);
+    spans.push([start, end]);
+  }
+  // brand: the parsed brand as written in the name; a manual override replaces it in the fields
+  const parsedBrand = parseItemMeta(raw).brand;
+  if (parsedBrand) {
+    const at = lowerRaw.indexOf(parsedBrand.toLowerCase());
+    if (at >= 0) spans.push([at, at + parsedBrand.length]);
+  }
+  let type = "";
+  let cursor = 0;
+  for (const [s, e] of spans.sort((a, b) => a[0] - b[0])) { if (s > cursor) type += raw.slice(cursor, s) + " "; cursor = Math.max(cursor, e); }
+  type += raw.slice(cursor);
+  type = tidy(type.replace(/^[\s,\-–·]+|[\s,\-–·]+$/g, ""));
+  const overrideBrand = meta && "brand" in meta ? tidy(meta.brand) : null;
+  return { color, brand: overrideBrand !== null ? overrideBrand : parsedBrand || "", type };
 }
