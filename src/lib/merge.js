@@ -73,7 +73,9 @@ function mergeTrip(base, local, remote) {
     items: (b, l, r) => mergeById(b, l, r, byId, (bi, li, ri) => mergeFields(bi, li, ri)),
     otdItems: (b, l, r) => mergeById(b, l, r, byName),
     otdChecked: (b, l, r) => mergeFields(b, l, r),
-    // outfitIds (the trip's outfit shortlist) is a small id list edited as a whole: local wins (generic rule).
+    // outfitIds (the trip's outfit shortlist): two devices shortlisting different
+    // outfits at once must end with both — same rule as the wardrobe lists (Sync Fix batch).
+    outfitIds: (b, l, r) => mergeStringLists(b, l, r),
     dayEmojis: (b, l, r) => mergeFields(b, l, r),
     // outfitPlan is edited as a whole in the Outfit Builder; if both devices
     // re-planned outfits at the same time, the one in your hand wins.
