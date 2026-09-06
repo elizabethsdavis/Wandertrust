@@ -958,6 +958,38 @@ with sync_playwright() as p:
     page.screenshot(path=f"{SHOTS}/14-closet.png")
     page.evaluate("() => localStorage.clear()")
 
+    # ── LY1–LY2: the Layout fix — a long name or "worn on" line must never push the outfit grid past the screen ──
+    # (Elizabeth's report once her Bay Area outfits were assigned to days: "many outfits are going out of horizontal view")
+    lay_outfits = [{"id": f"lo{i}", "name": n, "slots": {"top": "Light tan Diarrablu flowy robe top with orange, navy, yellow pattern", "bottom": "Maroon Madewell high-waisted skirt", "shoes": "Brown Vince Camuto leather loafers"},
+                    "photo": None, "createdAt": "2026-09-06T07:00:00.000Z", "updatedAt": "2026-09-06T07:00:00.000Z"}
+                   for i, n in enumerate(["Athletic Barbie", "Marigold Bridesmaid with a very long name indeed", "Seafoam Chill"])]
+    lay_plan = [[{"id": f"ld{d}a", "type": "daytime", "label": "Daytime", "slots": {}}, {"id": f"ld{d}b", "type": "evening", "label": "Evening", "slots": {}}] for d in range(8)]
+    for d, oi in [(0, 0), (1, 0), (3, 0), (5, 0), (6, 0), (2, 1)]:
+        occ = lay_plan[d][0 if d % 2 == 0 else 1]; occ.update({"slots": dict(lay_outfits[oi]["slots"]), "outfitId": lay_outfits[oi]["id"], "customized": False})
+    lay_trip = {"id": "lay1", "destination": "Bay Area", "tripType": ["city"], "days": 8, "weather": "warm", "startDate": "2026-09-06", "tempRange": "warm",
+                "items": [{"id": "li1", "name": "Alpha", "category": "necessities", "section": "Docs", "packed": False, "essential": False, "ff": False, "freq": 1, "needsRefill": False, "needsCharge": False}],
+                "otdItems": [], "otdChecked": {}, "createdAt": "2026-09-04T10:43:23.246Z", "icon": "🌉", "outfitIds": [o["id"] for o in lay_outfits], "outfitPlan": lay_plan,
+                "outfitDayNames": ["Travel Day", "Day 2", "Day 3", "Day 4", "Day 5", "Day 6", "Day 7", "Travel Home"]}
+    page.set_viewport_size({"width": 375, "height": 812})
+    page.evaluate("([t, so]) => { localStorage.setItem('pp2_trips', JSON.stringify([t])); localStorage.setItem('pp2_savedOutfits', JSON.stringify(so)); }", [lay_trip, lay_outfits])
+    page.goto(BASE + "/"); page.get_by_role("button", name="New Trip").wait_for()
+    page.locator("button", has_text="Bay Area").first.click(); page.get_by_role("button", name="Build Outfits").click(); page.get_by_text("Build My Outfits").wait_for()
+    page.get_by_role("button", name="Outfits", exact=False).first.click(); page.wait_for_timeout(400)
+    lay = page.evaluate("""() => { const g = [...document.querySelectorAll('div')].find(d => getComputedStyle(d).gridTemplateColumns.split(' ').length === 2 && d.children.length >= 3);
+      const cols = g ? getComputedStyle(g).gridTemplateColumns.split(' ').map(parseFloat) : []; return { sw: document.documentElement.scrollWidth, iw: innerWidth, cols, right: g ? Math.round(g.getBoundingClientRect().right) : null }; }""")
+    ok(lay["sw"] == lay["iw"] and len(lay["cols"]) == 2 and abs(lay["cols"][0] - lay["cols"][1]) < 1 and lay["right"] <= lay["iw"],
+       f"LY1 the trip's outfit grid stays two equal columns inside a 375 px screen with a 5-day worn list and a long name (page {lay['sw']}px wide, columns {[round(c) for c in lay['cols']]})")
+    ok(page.get_by_text("3 pieces · worn 5×").count() == 1 and page.get_by_text("3 pieces · Day 3 Daytime").count() == 1,
+       "LY1 a card worn on several days shows 'worn 5×'; a single day shows its name")
+    page.screenshot(path=f"{SHOTS}/15-layout-375.png")
+    page.locator("button[aria-label='Back']").first.click(); page.get_by_role("button", name="Focus Pack").wait_for()
+    page.locator("button:has(svg.lucide-arrow-left)").first.click(); page.get_by_role("button", name="New Trip").wait_for()
+    page.get_by_role("button", name=re.compile(r"^My Outfits")).click(); page.get_by_role("heading", name="Your closet").wait_for(); page.wait_for_timeout(300)
+    ok(page.evaluate("() => document.documentElement.scrollWidth") == 375, "LY2 the closet grid stays inside the screen too")
+    page.set_viewport_size({"width": 430, "height": 900})
+    page.locator("button[aria-label='Back']").first.click(); page.get_by_role("button", name="New Trip").wait_for()
+    page.evaluate("() => localStorage.clear()")
+
     ok(not errors, f"No JS/page errors during the run ({len(errors)} captured)" + ("" if not errors else ": " + errors[0][:160]))
     print("Network failures (sandbox proxy, external resources only?):", *net, sep="\n  ")
     browser.close()
