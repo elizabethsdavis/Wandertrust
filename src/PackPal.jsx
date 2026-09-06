@@ -34,6 +34,7 @@ import { Insights } from "./components/Insights";
 import { OutfitBuilder } from "./components/OutfitBuilder";
 import { Closet } from "./components/Closet";
 import { collectOutfitItems } from "./lib/outfits";
+import { renamePiece as renamePieceEverywhere, pieceUsage } from "./lib/pieces";
 import { useAuth } from "./lib/auth";
 
 // ═══════════════════════════════════════════════════════════════
@@ -363,7 +364,7 @@ export default function PackPal() {
   const [templateSync, setTemplateSync] = useState(false);
   const [arrangeMode, setArrangeMode] = useState(false);
   const [wardrobe, setWardrobe] = usePersist("wardrobe", {});
-  const [wardrobeMeta, setWardrobeMeta] = usePersist("wardrobeMeta", {}); // { [itemName]: { color?, brand? } } corrections (additive key)
+  const [wardrobeMeta, setWardrobeMeta] = usePersist("wardrobeMeta", {}); // { [itemName]: { color?, brand?, colorName?, type? } } — details / corrections (additive key)
   const [customOccasions, setCustomOccasions] = usePersist("customOccasions", []);
   const [otdItems, setOtdItems] = usePersist("otdItems", DEFAULT_OTD_ITEMS);
   const [editGlobalOtd, setEditGlobalOtd] = useState(false);
@@ -371,6 +372,13 @@ export default function PackPal() {
   const [addins, setAddins] = usePersist("addins", null); // trip-type / weather add-ins (additive key; null = built-in COND_ITEMS)
   const [categoryMeta, setCategoryMeta] = usePersist("categoryMeta", {}); // { [categoryId]: { label?, icon? } } display overrides (additive key)
   const [savedOutfits, setSavedOutfits] = usePersist("savedOutfits", []); // the closet: outfits outside any trip (additive key; see lib/outfits.js)
+  // Piece Edit batch: renaming a wardrobe piece follows through every store at once (pure: lib/pieces.js).
+  const renamePiece = (args) => {
+    const r = renamePieceEverywhere({ ...args, wardrobe, wardrobeMeta, savedOutfits, trips });
+    setWardrobe(r.wardrobe); setWardrobeMeta(r.wardrobeMeta); setSavedOutfits(r.savedOutfits); setTrips(r.trips);
+    return r;
+  };
+  const pieceUsageFor = (slotId, name) => pieceUsage(slotId, name, savedOutfits, trips);
   const { user } = useAuth(); // uid for outfit-photo Storage paths (local mode: "local-user")
   const categories = useMemo(() => resolveCategories(categoryMeta), [categoryMeta]);
   const [pickingTripIcon, setPickingTripIcon] = useState(false);
@@ -641,7 +649,7 @@ export default function PackPal() {
     return <><OutfitBuilder trip={activeTrip} savedOutfits={savedOutfits} setSavedOutfits={setSavedOutfits}
       wardrobe={wardrobe} setWardrobe={setWardrobe} wardrobeMeta={wardrobeMeta} setWardrobeMeta={setWardrobeMeta}
       customOccasions={customOccasions} setCustomOccasions={setCustomOccasions} uid={user?.id}
-      celebrate={celebrate}
+      celebrate={celebrate} renamePiece={renamePiece} pieceUsageFor={pieceUsageFor}
       onExit={() => setOutfitMode(false)}
       onSave={(occasions, dayNames, syncToList, dayEmojis, outfitIds) => {
         const planFields = { outfitPlan: occasions, outfitDayNames: dayNames, dayEmojis: dayEmojis || {}, outfitIds: Array.isArray(outfitIds) ? outfitIds : [] };
@@ -1396,7 +1404,7 @@ export default function PackPal() {
   if (view === "closet") {
     return <Closet savedOutfits={savedOutfits} setSavedOutfits={setSavedOutfits} trips={trips} setTrips={setTrips}
       wardrobe={wardrobe} setWardrobe={setWardrobe} wardrobeMeta={wardrobeMeta} setWardrobeMeta={setWardrobeMeta}
-      uid={user?.id} onExit={() => setView("home")} />;
+      uid={user?.id} onExit={() => setView("home")} renamePiece={renamePiece} pieceUsageFor={pieceUsageFor} />;
   }
 
   // ═══ INSIGHTS ═══
