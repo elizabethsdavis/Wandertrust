@@ -439,7 +439,7 @@ export function OutfitBuilder({ trip, savedOutfits, setSavedOutfits, wardrobe, s
               </div>
             </div>
           ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 }}>   {/* minmax(0,…): a long name / worn list must never widen a column past the screen (Layout fix) */}
               {shortlist.map((o) => <OutfitCard key={o.id} outfit={o} worn={wornOn(o.id)} onClick={() => setSheet(o.id)} />)}
             </div>
           )}

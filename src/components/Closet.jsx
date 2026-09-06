@@ -177,7 +177,7 @@ export function Closet({ savedOutfits, setSavedOutfits, trips, setTrips, wardrob
             </div>
           </div>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 }}>
             {list.map((o) => <OutfitCard key={o.id} outfit={o} onClick={() => { setOpenId(o.id); setRenaming(false); setPhotoError(""); }} />)}
           </div>
         )}

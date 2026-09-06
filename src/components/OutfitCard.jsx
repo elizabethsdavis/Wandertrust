@@ -91,16 +91,18 @@ export function OutfitCard({ outfit, onClick, badge, worn = [], selected, size =
   }
   return (
     <button onClick={onClick} aria-label={outfit.name}
-      style={{ display: "flex", flexDirection: "column", gap: 8, padding: 10, borderRadius: 18, textAlign: "left", cursor: "pointer", width: "100%",
+      style={{ display: "flex", flexDirection: "column", gap: 8, padding: 10, borderRadius: 18, textAlign: "left", cursor: "pointer", width: "100%", minWidth: 0, overflow: "hidden",
         background: C.warmWhite, border: `1.5px solid ${selected ? C.copper : C.borderLight}`, boxShadow: `0 2px 8px ${C.shadow}`, position: "relative" }}>
+      {/* minWidth 0 + overflow hidden (Layout fix): the name and the "worn on" line are nowrap + ellipsis, and without these a
+          long one made the card — and its grid column — wider than the screen once outfits were assigned to days */}
       {/* padding-top square: an <img> with height:100% inside an aspect-ratio box grows past it in Chrome */}
       <div style={{ position: "relative", width: "100%", paddingTop: "100%" }}>
         <div style={{ position: "absolute", inset: 0 }}><OutfitVisual outfit={outfit} size="100%" radius={12} /></div>
       </div>
-      <div style={{ minWidth: 0 }}>
+      <div style={{ minWidth: 0, width: "100%" }}>
         <div style={{ fontFamily: F.body, fontSize: 13.5, fontWeight: 500, color: C.charcoal, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{outfit.name}</div>
         <div style={{ fontFamily: F.body, fontSize: 11, color: C.softGray, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {n} piece{n === 1 ? "" : "s"}{worn.length > 0 ? ` · ${worn.join(", ")}` : ""}
+          {n} piece{n === 1 ? "" : "s"}{worn.length === 1 ? ` · ${worn[0]}` : worn.length > 1 ? ` · worn ${worn.length}×` : ""}
         </div>
       </div>
       {badge && <div style={{ position: "absolute", top: 14, left: 14 }}>{badge}</div>}
