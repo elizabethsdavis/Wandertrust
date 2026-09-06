@@ -78,7 +78,7 @@ keep the graph honest.
 | `reorder.js` | `moveSection()` / `moveItem()` — rebuild `trip.items` for Arrange mode (order *is* array order). |
 | `exportList.js` | `tripToMarkdown()` / `markdownFileName()` — the shareable Markdown checklist. |
 | `wardrobe.js` | `parseItemMeta()` (colour family + shade + two-tone, pattern, brand from capitalization / known brands), `swatchBackground()`, `colorToHex()`; manual overrides come from the `wardrobeMeta` key. Fields batch: `composeItemName()` builds the "<Colour> <Brand> <type>" name from the editor's three fields, `structuredMeta()` keeps what was typed (`colorName`, `type`) next to the overrides, `wardrobeBrands()` / `wardrobeTypes()` feed the form's suggestions; Piece Edit batch: `splitItemName()` turns a name (typed fields or a legacy free-text name) back into the three fields. |
-| `pieces.js` | Piece Edit batch — renaming a wardrobe piece everywhere it is referenced: `renameInSlots()`, `renameInOccasions()`, `renameInOutfits()`, `renameInTrips()` (day plans + synced packing items), `renameWardrobe()` (merges onto an existing name), `renameMeta()`, `pieceUsage()`, and `renamePiece()` which runs them over the four stores and returns the new state. |
+| `pieces.js` | Piece Edit batch — renaming a wardrobe piece everywhere it is referenced: `renameInSlots()`, `renameInOccasions()`, `renameInOutfits()`, `renameInTrips()` (day plans + synced packing items), `renameWardrobe()` (merges onto an existing name), `renameMeta()`, `pieceUsage()`, and `renamePiece()` which runs them over the four stores and returns the new state. Picker batch: `pieceIndex()` (one slot's pieces with parsed meta + where / when last worn, derived from the closet and trips), `pieceFacets()` (colour families + brands with counts), `filterPieces()` (query / chips), `groupPieces()` (Recently worn + colour groups). |
 | `addins.js` | Trip-type / weather add-ins (the `addins` key; defaults = `COND_ITEMS`): `addinItemsFor()` for `genList`, `detectConditions()` (rain / snow from forecast text), `WEATHER_KEYS` / `TYPE_KEYS` for the editor. |
 | `tripStatus.js` | `isPastTrip()` / `tripEndDate()` / `endedLabel()` — derived (never stored) "this trip is over" status for the read-only lock and the Home grouping. |
 | `version.js` | `APP_VERSION` (build stamp), `fetchDeployedVersion()`, `reloadApp(flush)`, `useUpdateAvailable()` — the reload button and the "newer version" banner. |
@@ -112,8 +112,8 @@ swatch override, rename — replaced `WardrobeMetaPicker.jsx`),
 `UpdateBanner.jsx` (mounted in `main.jsx`; "a newer version is ready"),
 `dnd.jsx` (shared dnd-kit sensors + grip handle for Arrange mode and the
 template editor), `EmojiPicker.jsx` (bottom sheet: suggestions + type any
-emoji; trip emoji and category emoji), `WardrobeCarousel.jsx` (one slot's
-wardrobe items with colour / brand swatches), `OutfitEditor.jsx` (the slot-by-slot
+emoji; trip emoji and category emoji), `WardrobePicker.jsx` (one slot's
+wardrobe as a searchable, chip-filtered, grouped list — replaced `WardrobeCarousel.jsx`), `OutfitEditor.jsx` (the slot-by-slot
 editor; its `NewPieceForm` takes colour / brand / type in separate fields and
 composes the piece name), `OutfitCard.jsx` (`OutfitCard`,
 `OutfitVisual` — photo or piece collage, `PieceList`, `Sheet`, `OutfitPicker`).
