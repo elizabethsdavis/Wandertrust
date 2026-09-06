@@ -68,11 +68,13 @@ keep the graph honest.
 | `packing.js` | `genList(types, days, template, { addins, tempRange, conditions })`, `genTripOtd()`, `tempToRange()` — the list-generation domain logic. |
 | `firebase.js` | Initializes the Firebase app + exports `auth`/`db`/`functions` and `LOCAL_MODE`. |
 | `auth.jsx` | `AuthProvider` / `useAuth()` — phone OTP, session, profile. |
-| `store.jsx` | `StoreProvider` + `usePersist()` — cloud-synced state with a localStorage mirror. |
+| `store.jsx` | `StoreProvider` + `usePersist()` / `useStoreMeta()` — mirrors the sync engine's data + status into React (cloud mode) or keeps pure localStorage state (local mode). Same call-site signatures as the old localStorage hook. |
+| `syncEngine.js` | Sync Fix batch — `createSyncEngine({ backend, mirror, uid, … })`: the React-free, Firebase-free core of cloud sync. Owns `data` + `base` (the cloud string the data was derived from) + `dirty`; `load()` (cloud is truth; adopts per-tab pending copies left by killed tabs), `edit()`, one serialized `push()` that always writes the latest state merged three-way against its ancestor inside the transaction, live-listener merging, backoff retries, `flush()`, `stop()`. Node-testable (injectable timers); fuzzed by `scripts/sync-fuzz.mjs`. |
+| `cloudBackend.js` | The three Firestore calls the engine needs for `state/{uid}`: `get`, `subscribe` (`onSnapshot`), `transact` (`runTransaction` read → `fn(currentString)` → write). |
 | `passkey.js` | WebAuthn register/login client. |
 | `importHist.js` | Converts `HIST_TRIPS` → editable trips for onboarding import. |
-| `localMirror.js` | The `pp2_*` localStorage mirror: read/write/clear + the `pp2_owner` uid tag. |
-| `merge.js` | `mergeState(base, local, remote)` — pure three-way merge used for multi-device sync. |
+| `localMirror.js` | The `pp2_*` localStorage mirror: read/write/clear + the `pp2_owner` uid tag; Sync Fix batch: `pp2_syncBase` and the per-tab `pp2_pending_<tab>` / `pp2_pendingBase_<tab>` copies of unsaved edits, exposed to the engine as `mirrorAdapter`. `writeLocal` skips keys whose object is unchanged since the last write. |
+| `merge.js` | `mergeState(base, local, remote)` — pure three-way merge used for multi-device sync (records by id, string lists as unions honouring deliberate removals — wardrobe slots and, since the Sync Fix batch, `trip.outfitIds`). |
 | `migrations.js` | `migrateTrip()` / `migrateTemplate()` — idempotent load-time migrations of persisted data (checkout → OTD, necessities → health, Clothing → Tops/Bottoms via `slotToSection()`). |
 | `template.js` | The packing template's pure logic: `templateBase()`, `expectedTemplateItems()`, `diffTripAgainstTemplate()`, `applyTemplateChanges()`, the `FLAGS` (refill / charge / laundry). |
 | `reorder.js` | `moveSection()` / `moveItem()` — rebuild `trip.items` for Arrange mode (order *is* array order). |
@@ -145,16 +147,23 @@ as `import.meta.env.VITE_APP_VERSION`.
 2. **`Gate`** decides what to show:
    `loading → splash`, `not signed in → AuthGate`, otherwise
    `<StoreProvider>` wrapping either `Onboarding` (first run) or `PackPal`.
-3. **`StoreProvider`** loads the user's state on login and exposes it through
-   `usePersist(key, default)`, which has the *exact* signature of the old
-   localStorage hook — so view code never knows whether it's online.
-4. **Writes** flow `usePersist setter → debounced, transactional Firestore write +
-   localStorage mirror`. Reads prefer the cloud, fall back to the mirror when offline.
-5. **Multi-device:** after the initial load the store listens with `onSnapshot`.
+3. **`StoreProvider`** creates one sync engine (`lib/syncEngine.js`) per signed-in
+   user, which loads the state and hands it back through `usePersist(key, default)`
+   — the *exact* signature of the old localStorage hook — so view code never knows
+   whether it's online.
+4. **Writes** flow `usePersist setter → engine.edit() → localStorage mirror (+ the
+   tab's pending copy while unsaved) → one debounced, serialized, transactional
+   Firestore write of the latest state`. Reads prefer the cloud, fall back to the
+   mirror (plus any pending copies) when offline.
+5. **Multi-device:** after the initial load the engine listens with `onSnapshot`.
    A change from another device is applied live when this device is clean, or
-   three-way merged (`lib/merge.js`) when it holds unsaved edits; the write
-   transaction merges the same way if the doc moved under it. Save failures and
-   the 1 MiB document limit are surfaced in the Account sheet (never silent).
+   three-way merged (`lib/merge.js`) against the cloud string this device's data
+   was derived from when it holds unsaved edits; the write transaction merges the
+   same way — against that same ancestor — whenever the doc it reads differs from
+   it, and Firestore re-runs it from a fresh read if the doc moves before the
+   commit. Save failures retry with backoff and show a banner (`SyncBanner`); the
+   1 MiB document limit is surfaced too (never silent). `scripts/sync-fuzz.mjs`
+   fuzzes all of this in plain node.
 
 ### Two modes (automatic)
 - **Local** — no `VITE_FIREBASE_*` env vars: no login, pure `localStorage`.

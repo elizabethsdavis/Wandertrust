@@ -130,10 +130,14 @@ blob per user**, mirroring how the app already treated `localStorage`. That keep
 const [trips, setTrips] = usePersist("trips", []);   // unchanged call sites
 ```
 
-- `StoreProvider` loads the blob on login, holds it in one state object,
-  **debounce-saves** on change, and mirrors to `localStorage` for offline reads.
+- `StoreProvider` runs one **sync engine** (`src/lib/syncEngine.js`) per user: it
+  loads the blob on login, holds it in one object, **debounce-saves** on change
+  (one serialized transactional write of the latest state, three-way merged
+  against the cloud string the state was derived from whenever the doc moved),
+  retries failures with backoff, and mirrors to `localStorage` for offline reads.
 - **Cloud is the source of truth** on load; the `localStorage` mirror is the
-  offline fallback.
+  offline fallback — and a tab's unsaved edits are kept in a per-tab pending
+  copy that the next load merges in, so a kill / reload never drops them.
 - Store the blob as a **JSON string** in Firestore (`{ state: "...", updatedAt }`).
   This sidesteps Firestore's no-nested-arrays and no-`undefined` constraints
   entirely. Mind the **1 MiB per-document limit** for heavy users (shard per-entity if you outgrow it).
@@ -271,6 +275,7 @@ fresh passkey on the live domain.
 | Live site | no sign-in screen (drops straight into the app) | `VITE_*` env missing at build → `LOCAL_MODE` | Set the six env vars on Vercel (Production) and **redeploy** (Vite inlines env at build time) |
 | Firebase wiring | which URL do I use? | per-deploy hashed URLs change every time | Use the **stable** production domain for `RP_ID` + authorized domains |
 | `git push` (deploy step) | "Permission to …/repo.git denied to `<other-account>`" | Wrong GitHub account authenticating — multi-account, and/or a global `insteadOf` rule rewriting HTTPS→SSH with the wrong key | `gh auth status` + `git config --get-regexp '^url\.'`; switch the active account / route this repo through the right credential |
+| Live app, two tabs / devices | an edit "disappears" (an outfit saved on the phone is gone minutes later; the doc's `updatedAt` keeps moving with unchanged content) | Pre-Sync-Fix store: a transaction re-run after contention, or a resumed tab, wrote an older snapshot without merging, and the three-way merge then read it as a deletion everywhere | Sync Fix batch (`src/lib/syncEngine.js`): one serialized write of the latest state merged against its own ancestor; per-tab pending copies survive a kill; `node scripts/sync-fuzz.mjs` reproduces the class. Make sure **every** open instance (Safari tab + Home Screen app) has reloaded onto the new build |
 
 ---
 
@@ -350,7 +355,10 @@ import rather than relying on magic.
 ```
 src/lib/firebase.js     env-driven client + LOCAL_MODE switch
 src/lib/auth.jsx        AuthProvider / useAuth — phone OTP + reCAPTCHA + profile
-src/lib/store.jsx       StoreProvider + usePersist (Firestore JSON blob + LS mirror)
+src/lib/store.jsx       StoreProvider + usePersist (React side of the store)
+src/lib/syncEngine.js   the cloud sync engine (load / edit / serialized merge-write / listener / retries)
+src/lib/cloudBackend.js the three Firestore calls the engine uses on state/{uid}
+scripts/sync-fuzz.mjs   node fuzz of the engine against a simulated Firestore
 src/lib/passkey.js      WebAuthn client → callable functions → signInWithCustomToken
 src/components/AuthGate.jsx    phone → OTP → passkey screen
 src/components/Onboarding.jsx  one-time setup gate
