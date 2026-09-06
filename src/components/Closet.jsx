@@ -2,7 +2,7 @@
 // any trip: browse with photos, rename, add a photo, edit pieces, see which
 // trips wear it, and — the only place this happens — delete it for good. Also
 // the one-time "Bring in outfits from past trips" import.
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Plus, Search, X, Camera, Pencil, Trash2, Download, CalendarDays, Check } from "lucide-react";
 import { C, F } from "../lib/theme";
 import { id as newId } from "../lib/utils";
@@ -65,9 +65,16 @@ export function Closet({ savedOutfits, setSavedOutfits, trips, setTrips, wardrob
     say("Deleted");
   };
 
-  const finishEdit = () => {
+  const [editNotice, setEditNotice] = useState("");
+  useEffect(() => { setEditNotice(""); }, [editing]);
+  const finishEdit = (reason) => {
     const { id, draft } = editing;
-    if (!id && slotCount(draft.slots) === 0 && !draft.photo && !draft.name.trim()) { setEditing(null); return; }
+    if (!id && slotCount(draft.slots) === 0 && !draft.photo && !draft.name.trim()) {
+      // Nothing to keep: the back arrow closes, an explicit "Save outfit" says why (Sync Fix batch).
+      if (reason === "done") { setEditNotice("Nothing to save yet — pick a piece, add a photo or name it."); return; }
+      setEditing(null);
+      return;
+    }
     const base = id ? saved.find((o) => o.id === id) : null;
     const rec = base ? updateOutfit(base, { name: draft.name, slots: draft.slots, photo: draft.photo }) : { ...newOutfit({ name: draft.name || "New outfit", slots: draft.slots, photo: draft.photo }), id: draft.id };
     upsert(rec);
@@ -83,7 +90,7 @@ export function Closet({ savedOutfits, setSavedOutfits, trips, setTrips, wardrob
         name={d.name} onName={(v) => setEditing((e) => ({ ...e, draft: { ...e.draft, name: v } }))}
         slots={d.slots} onSlots={(u) => setEditing((e) => ({ ...e, draft: { ...e.draft, slots: typeof u === "function" ? u(e.draft.slots) : u } }))}
         wardrobe={wardrobe} setWardrobe={setWardrobe} wardrobeMeta={wardrobeMeta} setWardrobeMeta={setWardrobeMeta}
-        photo={d.photo} photoBusy={photoBusy} photoError={photoError}
+        photo={d.photo} photoBusy={photoBusy} photoError={photoError} notice={editNotice}
         onPickPhoto={async (file) => { setPhotoBusy(true); setPhotoError(""); try { const photo = await savePhoto({ uid, outfitId: d.id, file }); setEditing((e) => ({ ...e, draft: { ...e.draft, photo } })); } catch (er) { setPhotoError(er?.message || "Couldn't add that photo."); } finally { setPhotoBusy(false); } }}
         onRemovePhoto={() => { deletePhoto(d.photo); setEditing((e) => ({ ...e, draft: { ...e.draft, photo: null } })); }}
         onRenamePiece={(args) => {   // Piece Edit batch: rename in every store, then in this draft

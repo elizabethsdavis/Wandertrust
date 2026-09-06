@@ -115,7 +115,7 @@ function NewPieceForm({ slot, brands, types, onAdd, onCancel, initial }) {
 }
 
 export function OutfitEditor({ title, subtitle, name, onName, namePlaceholder = "Name this outfit", slots, onSlots,
-  wardrobe, setWardrobe, wardrobeMeta, setWardrobeMeta, photo, onPickPhoto, onRemovePhoto, photoBusy, photoError,
+  wardrobe, setWardrobe, wardrobeMeta, setWardrobeMeta, photo, onPickPhoto, onRemovePhoto, photoBusy, photoError, notice,
   footer, onDone, onCancel, doneLabel = "Done", startSlot = 0, onRenamePiece, pieceUsageFor, pieceIndexFor }) {
   const [slotIdx, setSlotIdx] = useState(startSlot);
   const [addingNew, setAddingNew] = useState(null); // null | { color, brand, type } prefill for the "Add new" form
@@ -224,6 +224,7 @@ export function OutfitEditor({ title, subtitle, name, onName, namePlaceholder = 
         </div>
       )}
       {photoError && <div role="alert" style={{ fontFamily: F.body, fontSize: 12, color: C.danger, padding: "8px 20px 0" }}>{photoError}</div>}
+      {notice && <div role="status" style={{ fontFamily: F.body, fontSize: 12, fontWeight: 600, color: C.copper, padding: "8px 20px 0" }}>{notice}</div>}
 
       {/* Current slot */}
       <div style={{ padding: "16px 20px 24px" }}>

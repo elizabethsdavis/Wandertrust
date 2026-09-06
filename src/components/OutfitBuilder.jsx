@@ -136,6 +136,8 @@ export function OutfitBuilder({ trip, savedOutfits, setSavedOutfits, wardrobe, s
   const [flash, setFlash] = useState("");
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoError, setPhotoError] = useState("");
+  const [editNotice, setEditNotice] = useState(""); // shown inside the outfit editor (e.g. "Nothing to save yet")
+  useEffect(() => { setEditNotice(""); }, [editing]);
   const renameRef = useRef(null);
   useEffect(() => { if (renamingDay !== null && renameRef.current) { renameRef.current.focus(); renameRef.current.select(); } }, [renamingDay]);
   useEffect(() => { window.scrollTo(0, 0); }, [tab, editing]);
@@ -167,10 +169,16 @@ export function OutfitBuilder({ trip, savedOutfits, setSavedOutfits, wardrobe, s
   };
   const startEditOutfit = (o) => { setSheet(null); setEditing({ kind: "outfit", id: o.id, draft: { id: o.id, name: o.name, slots: JSON.parse(JSON.stringify(o.slots || {})), photo: o.photo || null } }); };
 
-  const finishOutfitEdit = () => {
+  const finishOutfitEdit = (reason) => {
     const { id: existingId, draft, returnTo } = editing;
     const empty = slotCount(draft.slots) === 0 && !draft.photo && (!draft.name || /^Outfit \d+$/.test(draft.name.trim()));
-    if (!existingId && empty) { setEditing(null); return; } // nothing to keep
+    if (!existingId && empty) {
+      // Nothing to keep. Leaving with the back arrow just closes; an explicit
+      // "Save outfit" says why nothing was saved instead of vanishing silently (Sync Fix batch).
+      if (reason === "done") { setEditNotice("Nothing to save yet — pick a piece, add a photo or name it."); return; }
+      setEditing(null);
+      return;
+    }
     let rec;
     if (existingId && byId.get(existingId)) {
       rec = updateOutfit(byId.get(existingId), { name: draft.name, slots: draft.slots, photo: draft.photo });
@@ -293,7 +301,7 @@ export function OutfitBuilder({ trip, savedOutfits, setSavedOutfits, wardrobe, s
         name={d.name} onName={(v) => setEditing((e) => ({ ...e, draft: { ...e.draft, name: v } }))}
         slots={d.slots} onSlots={(u) => setEditing((e) => ({ ...e, draft: { ...e.draft, slots: typeof u === "function" ? u(e.draft.slots) : u } }))}
         wardrobe={wardrobe} setWardrobe={setWardrobe} wardrobeMeta={wardrobeMeta} setWardrobeMeta={setWardrobeMeta}
-        photo={d.photo} photoBusy={photoBusy} photoError={photoError}
+        photo={d.photo} photoBusy={photoBusy} photoError={photoError} notice={editNotice}
         onPickPhoto={(file) => pickPhoto(d.id, file, (photo) => setEditing((e) => ({ ...e, draft: { ...e.draft, photo } })))}
         onRemovePhoto={() => { deletePhoto(d.photo); setEditing((e) => ({ ...e, draft: { ...e.draft, photo: null } })); }}
         onRenamePiece={onRenamePiece} pieceUsageFor={pieceUsageFor} pieceIndexFor={pieceIndexFor}
