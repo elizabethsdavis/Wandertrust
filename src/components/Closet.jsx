@@ -11,8 +11,9 @@ import { OutfitEditor, PhotoButton } from "./OutfitEditor";
 import { OutfitCard, OutfitVisual, PieceList, Sheet } from "./OutfitCard";
 import { newOutfit, updateOutfit, matchesQuery, outfitUsage, forgetOutfitInTrips, importOutfitsFromTrips, linkImportedOutfits, slotCount } from "../lib/outfits";
 import { savePhoto, deletePhoto } from "../lib/photos";
+import { renameInSlots } from "../lib/pieces";
 
-export function Closet({ savedOutfits, setSavedOutfits, trips, setTrips, wardrobe, setWardrobe, wardrobeMeta, setWardrobeMeta, uid, onExit }) {
+export function Closet({ savedOutfits, setSavedOutfits, trips, setTrips, wardrobe, setWardrobe, wardrobeMeta, setWardrobeMeta, uid, onExit, renamePiece, pieceUsageFor }) {
   const saved = savedOutfits || [];
   const [q, setQ] = useState("");
   const [openId, setOpenId] = useState(null);
@@ -85,6 +86,12 @@ export function Closet({ savedOutfits, setSavedOutfits, trips, setTrips, wardrob
         photo={d.photo} photoBusy={photoBusy} photoError={photoError}
         onPickPhoto={async (file) => { setPhotoBusy(true); setPhotoError(""); try { const photo = await savePhoto({ uid, outfitId: d.id, file }); setEditing((e) => ({ ...e, draft: { ...e.draft, photo } })); } catch (er) { setPhotoError(er?.message || "Couldn't add that photo."); } finally { setPhotoBusy(false); } }}
         onRemovePhoto={() => { deletePhoto(d.photo); setEditing((e) => ({ ...e, draft: { ...e.draft, photo: null } })); }}
+        onRenamePiece={(args) => {   // Piece Edit batch: rename in every store, then in this draft
+          const r = renamePiece ? renamePiece(args) : { finalName: args.newName };
+          const to = r?.finalName || args.newName;
+          setEditing((e) => (e?.draft ? { ...e, draft: { ...e.draft, slots: renameInSlots(e.draft.slots || {}, args.slotId, args.oldName, to) } } : e));
+          return r;
+        }} pieceUsageFor={pieceUsageFor}
         onDone={finishEdit} doneLabel={editing.id ? "Save" : "Save outfit"} />
     );
   }

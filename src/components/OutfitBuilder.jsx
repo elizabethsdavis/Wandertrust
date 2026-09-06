@@ -25,6 +25,7 @@ import { OutfitEditor, OUTFIT_SLOTS, PhotoButton } from "./OutfitEditor";
 import { OutfitCard, OutfitPicker, OutfitVisual, PieceList, Sheet } from "./OutfitCard";
 import { newOutfit, updateOutfit, assignOutfit, detachOutfit, propagateOutfit, slotsKey, slotCount, defaultOutfitName, cleanSlots } from "../lib/outfits";
 import { savePhoto, deletePhoto } from "../lib/photos";
+import { renameInOccasions, renameInSlots } from "../lib/pieces";
 
 export const DAY_EMOJIS = ["✈️", "☀️", "🌤️", "⭐", "🌸", "🎯", "💫", "🌊", "🏔️", "🎉", "🌺", "⚡", "🦋", "🌙", "🍂"];
 export const OCCASION_TYPES = [
@@ -101,7 +102,7 @@ function OccasionTypePicker({ types, onPick, onCreate, onCancel }) {
   );
 }
 
-export function OutfitBuilder({ trip, savedOutfits, setSavedOutfits, wardrobe, setWardrobe, wardrobeMeta, setWardrobeMeta, customOccasions, setCustomOccasions, uid, onSave, onExit, celebrate }) {
+export function OutfitBuilder({ trip, savedOutfits, setSavedOutfits, wardrobe, setWardrobe, wardrobeMeta, setWardrobeMeta, customOccasions, setCustomOccasions, uid, onSave, onExit, celebrate, renamePiece, pieceUsageFor }) {
   const allOccasionTypes = useMemo(() => [...OCCASION_TYPES, ...(customOccasions || [])], [customOccasions]);
   const saved = savedOutfits || [];
   const byId = useMemo(() => new Map(saved.map((o) => [o.id, o])), [saved]);
@@ -272,6 +273,18 @@ export function OutfitBuilder({ trip, savedOutfits, setSavedOutfits, wardrobe, s
 
   const finish = () => { onSave(occasions, dayNames, true, dayEmojiMap, outfitIds); onExit(); };
 
+  // Piece Edit batch: the app shell renames the piece in every store; this builder's own
+  // drafts (the day plan and the outfit being edited) are patched here so they don't
+  // write the old name back on exit. Patched directly — not through setOccSlots — so a
+  // day linked to the renamed outfit isn't flagged "customized" by the rename.
+  const onRenamePiece = (args) => {
+    const r = renamePiece ? renamePiece(args) : { finalName: args.newName };
+    const to = r?.finalName || args.newName;
+    setOccasions((prev) => renameInOccasions(prev, args.slotId, args.oldName, to).occasions);
+    setEditing((e) => (e?.kind === "outfit" && e.draft ? { ...e, draft: { ...e.draft, slots: renameInSlots(e.draft.slots || {}, args.slotId, args.oldName, to) } } : e));
+    return r;
+  };
+
   // ═══ EDITORS ═══
   if (editing?.kind === "outfit") {
     const d = editing.draft;
@@ -283,6 +296,7 @@ export function OutfitBuilder({ trip, savedOutfits, setSavedOutfits, wardrobe, s
         photo={d.photo} photoBusy={photoBusy} photoError={photoError}
         onPickPhoto={(file) => pickPhoto(d.id, file, (photo) => setEditing((e) => ({ ...e, draft: { ...e.draft, photo } })))}
         onRemovePhoto={() => { deletePhoto(d.photo); setEditing((e) => ({ ...e, draft: { ...e.draft, photo: null } })); }}
+        onRenamePiece={onRenamePiece} pieceUsageFor={pieceUsageFor}
         onDone={finishOutfitEdit} doneLabel={editing.id ? "Save" : "Save outfit"} />
     );
   }
@@ -305,6 +319,7 @@ export function OutfitBuilder({ trip, savedOutfits, setSavedOutfits, wardrobe, s
         name={occ.label} onName={(v) => patchOccasion(editing.dayIdx, editing.occIdx, (o) => ({ ...o, label: v }))} namePlaceholder="Occasion"
         slots={occ.slots || {}} onSlots={(u) => setOccSlots(editing, u)}
         wardrobe={wardrobe} setWardrobe={setWardrobe} wardrobeMeta={wardrobeMeta} setWardrobeMeta={setWardrobeMeta}
+        onRenamePiece={onRenamePiece} pieceUsageFor={pieceUsageFor}
         footer={footer} onDone={() => { setEditing(null); haptic("success"); }} />
     );
   }

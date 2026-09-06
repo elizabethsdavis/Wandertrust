@@ -8,6 +8,9 @@
 //   photo / onPickPhoto / onRemovePhoto / photoBusy   optional photo controls (saved outfits)
 //   footer               optional extra actions rendered above the navigation
 //   onDone(reason)       back arrow / Done; onCancel when provided renders an "x"
+//   onRenamePiece({ slotId, oldName, newName, entry }) → { finalName }   (Piece Edit batch) the parent
+//                        renames the piece in every store AND in its own drafts (incl. these `slots`)
+//   pieceUsageFor(slotId, name) → { outfits, days, items }   for the edit sheet's note
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Check, X, Plus, ChevronLeft, ChevronRight, Camera, Loader, Trash2, Shirt, Palette, Shield, Footprints, ShoppingBag, Gem, Watch, Eye, Star } from "lucide-react";
 import { C, F } from "../lib/theme";
@@ -15,7 +18,8 @@ import { Btn } from "./ui";
 import { WardrobeCarousel } from "./WardrobeCarousel";
 import { OUTFIT_SLOT_DEFS } from "../data/outfitSlots";
 import { photoSrc } from "../lib/photos";
-import { composeItemName, structuredMeta, applyMetaPatch, parseItemMeta, swatchBackground, wardrobeBrands, wardrobeTypes, COLOR_FAMILY_IDS } from "../lib/wardrobe";
+import { composeItemName, structuredMeta, parseItemMeta, swatchBackground, wardrobeBrands, wardrobeTypes, COLOR_FAMILY_IDS } from "../lib/wardrobe";
+import { renameWardrobe, renameMeta } from "../lib/pieces";
 
 const ICONS = { top: Shirt, bottom: Palette, layer: Shield, shoes: Footprints, bag: ShoppingBag, necklace: Gem, bracelet: Watch, eyewear: Eye, hair: Star };
 /** The slot table with its Lucide icon attached (what the old OUTFIT_SLOTS was). */
@@ -43,7 +47,8 @@ const fieldLabel = { fontFamily: F.body, fontSize: 10.5, fontWeight: 600, textTr
  * "Add new <slot>" — the colour, the brand and the type of clothing in separate
  * fields (Fields batch). The three compose into one item name ("Black Lululemon
  * flowy pants"), previewed live with its colour swatch; Enter hops colour →
- * brand → type, Enter on the type adds. Only the type is required.
+ * brand → type, Enter on the type adds. A type or a brand is required (a
+ * brand-only piece like "Black Longchamp" is fine).
  */
 function NewPieceForm({ slot, brands, types, onAdd, onCancel }) {
   const [color, setColor] = useState("");
@@ -54,7 +59,7 @@ function NewPieceForm({ slot, brands, types, onAdd, onCancel }) {
   const name = composeItemName({ color, brand, type });
   const preview = name ? parseItemMeta(name, structuredMeta({ color, brand, type }) || undefined) : null;
   const swatch = preview ? swatchBackground(preview) : null;
-  const canAdd = !!type.trim();
+  const canAdd = !!(type.trim() || brand.trim());
   const submit = (e) => { e?.preventDefault(); if (canAdd) onAdd({ color, brand, type }); };
   const hop = (ref) => (e) => { if (e.key === "Enter") { e.preventDefault(); ref.current?.focus(); } };
   const slotWord = slot.label.toLowerCase().replace(/\s*\(.*\)|\s*\/.*$/g, "");   // "Necklace(s)" → "necklace", "Bag / Purse" → "bag"
@@ -110,7 +115,7 @@ function NewPieceForm({ slot, brands, types, onAdd, onCancel }) {
 
 export function OutfitEditor({ title, subtitle, name, onName, namePlaceholder = "Name this outfit", slots, onSlots,
   wardrobe, setWardrobe, wardrobeMeta, setWardrobeMeta, photo, onPickPhoto, onRemovePhoto, photoBusy, photoError,
-  footer, onDone, onCancel, doneLabel = "Done", startSlot = 0 }) {
+  footer, onDone, onCancel, doneLabel = "Done", startSlot = 0, onRenamePiece, pieceUsageFor }) {
   const [slotIdx, setSlotIdx] = useState(startSlot);
   const [addingNew, setAddingNew] = useState(false);
   useEffect(() => { window.scrollTo(0, 0); }, [slotIdx]);
@@ -158,6 +163,17 @@ export function OutfitEditor({ title, subtitle, name, onName, namePlaceholder = 
     const alreadyOn = selectedIsMulti ? selectedValue.includes(finalName) : selectedValue === finalName;
     if (!alreadyOn) setSlotValue(finalName, true);
     setAddingNew(false);
+  };
+  // "Edit piece" sheet: same name → store the details; new name → the parent renames it everywhere
+  // (falls back to this wardrobe + these slots when no parent handler is wired).
+  const editPiece = ({ name: oldName, newName, entry }) => {
+    const sid = currentSlot.id;
+    if (newName === oldName) { setWardrobeMeta?.((prev) => renameMeta(prev, oldName, oldName, entry)); return; }
+    if (onRenamePiece) { onRenamePiece({ slotId: sid, oldName, newName, entry }); return; }
+    const w = renameWardrobe(wardrobe, sid, oldName, newName);
+    setWardrobe?.(() => w.wardrobe);
+    setWardrobeMeta?.((prev) => renameMeta(prev, oldName, w.finalName, entry));
+    onSlots((prev) => { const p = prev || {}; const v = p[sid]; if (Array.isArray(v)) return { ...p, [sid]: v.map((x) => (x === oldName ? w.finalName : x)) }; return v === oldName ? { ...p, [sid]: w.finalName } : p; });
   };
 
   return (
@@ -280,7 +296,7 @@ export function OutfitEditor({ title, subtitle, name, onName, namePlaceholder = 
             <div style={{ fontFamily: F.body, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: C.warmGray, marginBottom: 10, paddingLeft: 4 }}>Your wardrobe</div>
           )}
           <WardrobeCarousel slotId={currentSlot.id} wardrobe={wardrobe || {}} wardrobeMeta={wardrobeMeta}
-            onSetMeta={(n, patch) => setWardrobeMeta?.((prev) => { const next = { ...(prev || {}) }; const entry = applyMetaPatch(next[n], patch); if (entry) next[n] = entry; else delete next[n]; return next; })}
+            onEditPiece={editPiece} usageFor={(n) => pieceUsageFor?.(currentSlot.id, n)}
             onSelect={(item) => setSlotValue(item, true)} selected={selectedValue}
             onRemoveItem={(item) => setWardrobe?.((prev) => ({ ...(prev || {}), [currentSlot.id]: ((prev || {})[currentSlot.id] || []).filter((i) => i !== item) }))} />
         </div>

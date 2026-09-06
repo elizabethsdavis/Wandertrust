@@ -1,20 +1,43 @@
 // Outfit cards and pickers (Outfits batch): a saved outfit as a tappable card
 // with its photo — or, without one, a small "collage" of its pieces — and the
 // bottom-sheet picker used to choose an outfit for a day or add one to a trip.
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X, Search, Plus, Check, FolderOpen } from "lucide-react";
 import { C, F } from "../lib/theme";
 import { SLOT_BY_ID } from "../data/outfitSlots";
 import { slotEntries, matchesQuery } from "../lib/outfits";
-import { photoThumb, photoSrc } from "../lib/photos";
+import { photoThumb, photoCard, photoSrc } from "../lib/photos";
+
+/**
+ * A photo drawn in two layers: the tiny inline thumb shows at once (blurred),
+ * the real rendition — the ~480 px card image, or the full image on the sheet —
+ * fades in over it once it has loaded (Photo Quality fix: cards used to draw
+ * the 80 px thumb itself, which is blurry on a phone screen).
+ */
+function LayeredPhoto({ placeholder, src, alt, size, radius }) {
+  const [loaded, setLoaded] = useState(false);
+  const imgRef = useRef(null);
+  useEffect(() => { const el = imgRef.current; if (el && el.complete && el.naturalWidth > 0) setLoaded(true); }, [src]);   // already cached → no fade wait
+  const layer = { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", display: "block" };
+  return (
+    <div style={{ position: "relative", width: size, height: size, borderRadius: radius, overflow: "hidden", background: C.creamDark, flexShrink: 0 }}>
+      {placeholder && placeholder !== src && !loaded && (
+        <img src={placeholder} alt="" aria-hidden="true" style={{ ...layer, filter: "blur(4px)", transform: "scale(1.06)" }} />
+      )}
+      <img ref={imgRef} src={src} alt={alt} loading="lazy" decoding="async" onLoad={() => setLoaded(true)}
+        style={{ ...layer, opacity: loaded ? 1 : 0, transition: "opacity .25s ease" }} />
+    </div>
+  );
+}
 
 /** Photo or a piece collage, square. */
 export function OutfitVisual({ outfit, size = 120, radius = 16, full = false }) {
-  const src = full ? photoSrc(outfit?.photo) : photoThumb(outfit?.photo);
+  const photo = outfit?.photo;
+  const src = full ? photoSrc(photo) : photoCard(photo);
   const pieces = slotEntries(outfit?.slots);
   const px = typeof size === "number" ? size : 140; // "100%" (grid cards) → size the collage type as a 140px tile
   if (src) {
-    return <img src={src} alt={outfit?.name || "Outfit"} style={{ width: size, height: size, borderRadius: radius, objectFit: "cover", display: "block", background: C.creamDark }} />;
+    return <LayeredPhoto key={src} placeholder={photoThumb(photo)} src={src} alt={outfit?.name || "Outfit"} size={size} radius={radius} />;
   }
   return (
     <div aria-hidden="true" style={{ width: size, height: size, borderRadius: radius, background: `linear-gradient(135deg, ${C.creamDark}, ${C.cream})`,

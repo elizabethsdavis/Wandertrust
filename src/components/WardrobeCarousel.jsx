@@ -1,17 +1,20 @@
 // The wardrobe carousel: every item the closet holds for one slot, grouped by
-// colour family, with the colour / brand swatch (tap to fix) and a remove
-// button. Props only — used by the outfit editor (extracted from PackPal.jsx in
-// the Outfits batch, unchanged).
+// colour family, with the colour / brand row (tap to edit the piece — Piece
+// Edit batch) and a remove button. Props only — used by the outfit editor
+// (extracted from PackPal.jsx in the Outfits batch).
+//   onEditPiece({ name, newName, entry })  save from the edit sheet (rename when newName differs)
+//   usageFor(name) → { outfits, days, items }   for the sheet's "renaming updates …" line
 import { useMemo, useRef, useState } from "react";
-import { Check, X } from "lucide-react";
+import { Check, X, Pencil } from "lucide-react";
 import { C, F } from "../lib/theme";
 import { parseItemMeta, swatchBackground } from "../lib/wardrobe";
-import { WardrobeMetaPicker } from "./WardrobeMetaPicker";
+import { SLOT_BY_ID } from "../data/outfitSlots";
+import { PieceEditSheet } from "./PieceEditSheet";
 
-export function WardrobeCarousel({ slotId, wardrobe, wardrobeMeta, onSetMeta, onSelect, selected, onRemoveItem }) {
+export function WardrobeCarousel({ slotId, wardrobe, wardrobeMeta, onEditPiece, usageFor, onSelect, selected, onRemoveItem }) {
   const items = (wardrobe[slotId] || []);
   const scrollRef = useRef(null);
-  const [fixing, setFixing] = useState(null); // item name whose colour/brand is being corrected
+  const [editing, setEditing] = useState(null); // item name being edited in the sheet
   // selected can be a string (single) or array (multi)
   const selArr = Array.isArray(selected) ? selected : selected ? [selected] : [];
   const metaFor = (item) => parseItemMeta(item, wardrobeMeta?.[item]);
@@ -32,9 +35,10 @@ export function WardrobeCarousel({ slotId, wardrobe, wardrobeMeta, onSetMeta, on
 
   return (
     <div>
-      {fixing && (
-        <WardrobeMetaPicker name={fixing} meta={wardrobeMeta?.[fixing]} onClose={() => setFixing(null)}
-          onSave={(patch) => onSetMeta?.(fixing, patch)} />
+      {editing && (
+        <PieceEditSheet slot={SLOT_BY_ID[slotId]} name={editing} meta={wardrobeMeta?.[editing]} usage={usageFor?.(editing)} onClose={() => setEditing(null)}
+          onSave={({ name, entry }) => onEditPiece?.({ name: editing, newName: name, entry })}
+          onRemove={onRemoveItem && !selArr.includes(editing) ? () => onRemoveItem(editing) : undefined} />
       )}
       {allItems.length > 0 && (
         <div ref={scrollRef} style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 8,
@@ -52,10 +56,10 @@ export function WardrobeCarousel({ slotId, wardrobe, wardrobeMeta, onSetMeta, on
                     cursor: "pointer", textAlign: "left", transition: "all .2s",
                     transform: isSel ? "scale(1.02)" : "scale(1)",
                     boxShadow: isSel ? `0 4px 16px rgba(193,127,89,.2)` : `0 1px 4px ${C.shadow}` }}>
-                  {/* Colour / brand / pattern row — tap to correct */}
-                  <span role="button" tabIndex={0} title="Tap to fix the colour or brand"
-                    onClick={(e) => { e.stopPropagation(); setFixing(item); }}
-                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); setFixing(item); } }}
+                  {/* Colour / brand / pattern row — tap to edit the piece */}
+                  <span role="button" tabIndex={0} title="Edit this piece" aria-label={`Edit ${item}`}
+                    onClick={(e) => { e.stopPropagation(); setEditing(item); }}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); setEditing(item); } }}
                     style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, minHeight: 14, cursor: "pointer" }}>
                     {swatch ? (
                       <span style={{ width: 12, height: 12, borderRadius: 6, background: swatch, flexShrink: 0,
@@ -68,6 +72,7 @@ export function WardrobeCarousel({ slotId, wardrobe, wardrobeMeta, onSetMeta, on
                       letterSpacing: ".05em", color: C.softGray, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{meta.brand}</span>}
                     {meta.pattern && <span style={{ fontFamily: F.body, fontSize: 9, fontWeight: 600, textTransform: "uppercase",
                       letterSpacing: ".05em", color: C.copper, background: C.copperSubtle, padding: "1px 5px", borderRadius: 4 }}>{meta.pattern}</span>}
+                    <Pencil size={10} color={C.softGray} style={{ marginLeft: "auto", flexShrink: 0 }} aria-hidden="true" />
                   </span>
                   <div style={{ fontFamily: F.body, fontSize: 13, fontWeight: isSel ? 600 : 400,
                     color: C.charcoal, lineHeight: 1.3,
